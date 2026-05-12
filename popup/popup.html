@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>YouTube Watched Marker</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="popup">
+      <header class="header">
+        <div>
+          <h1>Watch Queue</h1>
+          <p id="summary">Loading...</p>
+        </div>
+        <div class="header-actions">
+          <button id="optionsToggle" type="button" aria-expanded="false" aria-controls="settingsPanel" title="Show playback, queue, and worker-window settings.">Options</button>
+          <button id="debugToggle" type="button" aria-pressed="false" title="Show detailed worker timing and playback events for each queue item.">Debug</button>
+          <button id="clearButton" type="button" title="Remove every queue item and stop the active worker if one is running.">Clear</button>
+        </div>
+      </header>
+
+      <section id="emptyState" class="empty" hidden>
+        No queued videos yet.
+      </section>
+
+      <section id="settingsPanel" class="settings" aria-label="Worker settings" hidden>
+        <p class="settings-warning">
+          Marking opens YouTube videos briefly in a muted worker window while signed in.
+        </p>
+        <label class="field worker-field" title="Choose where the temporary YouTube playback worker opens. Secondary window is recommended for desktop use.">
+          <span>Worker</span>
+          <select id="workerMode" aria-describedby="workerModeHelp">
+            <option value="window">Secondary window</option>
+            <option value="tab">Browser tab</option>
+          </select>
+          <span id="workerModeHelp" class="sr-only">Choose where the temporary YouTube playback worker opens. Secondary window is recommended for desktop use.</span>
+        </label>
+        <label class="field compact-field" title="How many seconds the video should keep playing after playback starts.">
+          <span>Play</span>
+          <input id="playbackSeconds" type="number" min="1" max="30" step="1" aria-describedby="playbackSecondsHelp">
+          <span id="playbackSecondsHelp" class="sr-only">How many seconds the video should keep playing after playback starts.</span>
+        </label>
+        <label class="field compact-field" title="How far from the end of the video the worker should seek before playing.">
+          <span>Seek</span>
+          <input id="seekFromEndSeconds" type="number" min="5" max="120" step="5" aria-describedby="seekFromEndSecondsHelp">
+          <span id="seekFromEndSecondsHelp" class="sr-only">How far from the end of the video the worker should seek before playing.</span>
+        </label>
+        <label class="field compact-field" title="Maximum number of pending or running items allowed at once. Completed and failed history does not count.">
+          <span>Max</span>
+          <input id="maxQueueSize" type="number" min="1" max="100" step="1" aria-describedby="maxQueueSizeHelp">
+          <span id="maxQueueSizeHelp" class="sr-only">Maximum number of pending or running items allowed at once. Completed and failed history does not count.</span>
+        </label>
+        <label class="check-field" title="Ask YouTube for a low playback quality to reduce bandwidth and CPU use. YouTube may ignore this.">
+          <input id="lowQualityEnabled" type="checkbox">
+          <span>Low quality</span>
+        </label>
+        <p id="windowBounds" class="settings-note"></p>
+        <div class="settings-actions">
+          <button id="pauseButton" type="button" title="Pause or resume automatic processing. New videos can still be added while paused.">Pause queue</button>
+          <button id="resetWindowButton" type="button" title="Forget the saved worker-window position and use the default secondary-monitor placement next time.">Reset window</button>
+          <button id="stopButton" type="button" title="Close the currently running worker and mark that queue item as stopped.">Stop</button>
+          <button id="retryFailedButton" type="button" title="Move failed items back to pending, up to the active queue limit.">Retry failed</button>
+          <button id="clearCompletedButton" type="button" title="Remove completed items from the queue history.">Clear done</button>
+          <button id="clearFailedButton" type="button" title="Remove failed items from the queue history.">Clear failed</button>
+          <button id="exportDebugButton" type="button" title="Download local queue, settings, and worker timing events as a JSON file.">Export log</button>
+        </div>
+      </section>
+
+      <ol id="queueList" class="queue" aria-label="Queued videos"></ol>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,55 @@
+{
+  "manifest_version": 2,
+  "name": "YouTube Watched Marker",
+  "version": "0.1.4",
+  "description": "Queues YouTube videos and briefly plays them in a worker window to simulate watched playback.",
+  "permissions": [
+    "contextMenus",
+    "storage",
+    "tabs",
+    "*://www.youtube.com/*",
+    "*://m.youtube.com/*",
+    "*://youtu.be/*"
+  ],
+  "background": {
+    "scripts": [
+      "src/background.js"
+    ],
+    "persistent": true
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://www.youtube.com/*",
+        "*://m.youtube.com/*"
+      ],
+      "js": [
+        "src/youtube-content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "browser_action": {
+    "default_title": "YouTube Watched Marker",
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "48": "icons/icon-48.svg",
+      "96": "icons/icon-96.svg"
+    }
+  },
+  "icons": {
+    "48": "icons/icon-48.svg",
+    "96": "icons/icon-96.svg"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "youtube-watched-marker@example.com",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ]
+      },
+      "strict_min_version": "115.0"
+    }
+  }
+}
