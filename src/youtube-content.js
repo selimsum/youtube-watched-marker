@@ -4,6 +4,7 @@ const MENU_ITEM_CLASS = "youtube-watched-marker-menu-item";
 const MENU_ITEM_SELECTOR = `.${MENU_ITEM_CLASS}`;
 const MENU_LIST_MARKER = "youtubeWatchedMarkerInjected";
 const HIDDEN_ITEM_CLASS = "youtube-watched-marker-hidden-native-item";
+const MENU_ITEM_HOVER_BACKGROUND = "var(--yt-spec-10-percent-layer, rgba(0, 0, 0, 0.1))";
 let scanTimer = null;
 let lastMenuVideoUrl = null;
 let lastMenuVideoTitle = "";
@@ -267,9 +268,17 @@ function createMenuItem() {
   item.addEventListener("pointerdown", (event) => {
     event.stopPropagation();
   });
+  item.addEventListener("pointerenter", () => setMenuItemHover(item, true));
+  item.addEventListener("pointerleave", () => setMenuItemHover(item, false));
+  item.addEventListener("focus", () => setMenuItemHover(item, true));
+  item.addEventListener("blur", () => setMenuItemHover(item, false));
   item.addEventListener("click", handleClick);
 
   return item;
+}
+
+function setMenuItemHover(item, active) {
+  item.style.background = active ? MENU_ITEM_HOVER_BACKGROUND : "transparent";
 }
 
 function closeYouTubeMenu(item) {

@@ -679,7 +679,7 @@ async function closeWorkerQuietly(worker) {
   }
 
   if (worker.windowId) {
-    await rememberWorkerWindowBounds(worker.windowId);
+    await rememberWorkerWindowBounds(worker);
 
     try {
       await extensionApi.windows.remove(worker.windowId);
@@ -699,35 +699,82 @@ async function getWorkerWindowBounds() {
   const bounds = result[WORKER_WINDOW_BOUNDS_KEY] || {};
 
   return {
-    left: Number.isFinite(bounds.left) ? bounds.left : DEFAULT_WORKER_WINDOW_BOUNDS.left,
-    top: Number.isFinite(bounds.top) ? bounds.top : DEFAULT_WORKER_WINDOW_BOUNDS.top,
+    left: normalizeWindowPosition(bounds.left, DEFAULT_WORKER_WINDOW_BOUNDS.left),
+    top: normalizeWindowPosition(bounds.top, DEFAULT_WORKER_WINDOW_BOUNDS.top),
     width: normalizeWorkerWindowSize(bounds.width, DEFAULT_WORKER_WINDOW_BOUNDS.width),
     height: normalizeWorkerWindowSize(bounds.height, DEFAULT_WORKER_WINDOW_BOUNDS.height)
   };
 }
 
-function normalizeWorkerWindowSize(value, fallback) {
-  if (!Number.isFinite(value)) {
+function normalizeWindowPosition(value, fallback) {
+  const numberValue = Number(value);
+
+  if (!Number.isFinite(numberValue)) {
     return fallback;
   }
 
-  return Math.min(value, fallback);
+  return Math.round(numberValue);
 }
 
-async function rememberWorkerWindowBounds(windowId) {
+function normalizeWorkerWindowSize(value, fallback) {
+  const numberValue = Number(value);
+
+  if (!Number.isFinite(numberValue)) {
+    return fallback;
+  }
+
+  return Math.min(Math.max(Math.round(numberValue), 320), fallback);
+}
+
+async function rememberWorkerWindowBounds(worker) {
   try {
-    const workerWindow = await extensionApi.windows.get(windowId);
-    await extensionApi.storage.local.set({
-      [WORKER_WINDOW_BOUNDS_KEY]: {
-        left: workerWindow.left,
-        top: workerWindow.top,
-        width: DEFAULT_WORKER_WINDOW_BOUNDS.width,
-        height: DEFAULT_WORKER_WINDOW_BOUNDS.height
-      }
+    const workerWindow = await extensionApi.windows.get(worker.windowId);
+    const actualBounds = normalizeWorkerBounds({
+      left: workerWindow.left,
+      top: workerWindow.top,
+      width: workerWindow.width,
+      height: workerWindow.height
     });
+    const requestedBounds = normalizeWorkerBounds(worker.requestedBounds || {});
+
+    if (shouldIgnorePrimaryFallbackBounds(actualBounds, requestedBounds)) {
+      await updateQueueItemWithDebug(worker.itemId, {}, {
+        event: `window-bounds-ignored-primary-fallback-${formatBounds(actualBounds)}`,
+        elapsedMs: null
+      }).catch(() => {});
+      return;
+    }
+
+    await extensionApi.storage.local.set({
+      [WORKER_WINDOW_BOUNDS_KEY]: actualBounds
+    });
+    await updateQueueItemWithDebug(worker.itemId, {}, {
+      event: `window-bounds-saved-${formatBounds(actualBounds)}`,
+      elapsedMs: null
+    }).catch(() => {});
   } catch (_error) {
     // The worker window may already be closed.
   }
+}
+
+function normalizeWorkerBounds(bounds) {
+  return {
+    left: normalizeWindowPosition(bounds.left, DEFAULT_WORKER_WINDOW_BOUNDS.left),
+    top: normalizeWindowPosition(bounds.top, DEFAULT_WORKER_WINDOW_BOUNDS.top),
+    width: normalizeWorkerWindowSize(bounds.width, DEFAULT_WORKER_WINDOW_BOUNDS.width),
+    height: normalizeWorkerWindowSize(bounds.height, DEFAULT_WORKER_WINDOW_BOUNDS.height)
+  };
+}
+
+function shouldIgnorePrimaryFallbackBounds(actualBounds, requestedBounds) {
+  const requestedSecondary = requestedBounds.left >= DEFAULT_WORKER_WINDOW_BOUNDS.left;
+  const actualPrimaryFallback = actualBounds.left <= 100 && actualBounds.top <= 100;
+
+  return requestedSecondary && actualPrimaryFallback;
+}
+
+function formatBounds(bounds) {
+  return `${bounds.left},${bounds.top},${bounds.width}x${bounds.height}`;
 }
 
 async function createWorkerWindow(url) {
@@ -748,8 +795,28 @@ async function createWorkerWindow(url) {
 
   return {
     windowId: workerWindow.id,
-    tab: workerWindow.tabs && workerWindow.tabs[0]
+    tab: workerWindow.tabs && workerWindow.tabs[0],
+    requestedBounds: bounds
   };
+}
+
+async function rememberOpenedWorkerWindowBounds(itemId, windowId) {
+  try {
+    const workerWindow = await extensionApi.windows.get(windowId);
+    const openedBounds = normalizeWorkerBounds({
+      left: workerWindow.left,
+      top: workerWindow.top,
+      width: workerWindow.width,
+      height: workerWindow.height
+    });
+
+    await updateQueueItemWithDebug(itemId, {}, {
+      event: `window-bounds-opened-${formatBounds(openedBounds)}`,
+      elapsedMs: null
+    });
+  } catch (_error) {
+    // Diagnostic only.
+  }
 }
 
 async function forceWorkerWindowBounds(windowId, left, top) {
@@ -1036,6 +1103,11 @@ async function runQueueItem(item) {
       const workerWindow = await createWorkerWindow(buildWatchUrl(item.videoId));
       tab = workerWindow.tab;
       workerWindowId = workerWindow.windowId;
+      await updateQueueItemWithDebug(item.id, {}, {
+        event: `window-bounds-requested-${formatBounds(workerWindow.requestedBounds)}`,
+        elapsedMs: null
+      }).catch(() => {});
+      await rememberOpenedWorkerWindowBounds(item.id, workerWindowId);
     } else {
       tab = await extensionApi.tabs.create({
         url: buildWatchUrl(item.videoId),
@@ -1051,6 +1123,9 @@ async function runQueueItem(item) {
       itemId: item.id,
       tabId: tab.id,
       windowId: workerWindowId,
+      requestedBounds: settings.workerMode === "window"
+        ? await getWorkerWindowBounds()
+        : null,
       lastStatus: settings.workerMode === "window" ? "window-created" : "tab-created",
       previousTabId: previousTab && previousTab.id !== tab.id ? previousTab.id : null,
       previousWindowId: previousTab && previousTab.windowId !== workerWindowId ? previousTab.windowId : null
