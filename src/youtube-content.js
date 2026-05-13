@@ -5,9 +5,17 @@ const MENU_ITEM_SELECTOR = `.${MENU_ITEM_CLASS}`;
 const MENU_LIST_MARKER = "youtubeWatchedMarkerInjected";
 const HIDDEN_ITEM_CLASS = "youtube-watched-marker-hidden-native-item";
 const MENU_ITEM_HOVER_BACKGROUND = "var(--yt-spec-10-percent-layer, rgba(0, 0, 0, 0.1))";
+const WORKER_WINDOW_BOUNDS = {
+  left: 2176,
+  top: 144,
+  width: 1280,
+  height: 720
+};
 let scanTimer = null;
 let lastMenuVideoUrl = null;
 let lastMenuVideoTitle = "";
+let pendingOpenedWorkerWindow = null;
+let pendingOpenedWorkerUrl = null;
 
 function getExtensionApi() {
   if (typeof browser !== "undefined") {
@@ -209,11 +217,63 @@ function getFallbackVideoUrl() {
   return null;
 }
 
+function getVideoIdFromUrl(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    const watchId = url.searchParams.get("v");
+
+    if (watchId) {
+      return watchId;
+    }
+
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (["shorts", "embed", "live"].includes(parts[0])) {
+      return parts[1] || null;
+    }
+  } catch (_error) {}
+
+  return null;
+}
+
+function buildWorkerUrl(rawUrl) {
+  const videoId = getVideoIdFromUrl(rawUrl);
+
+  if (!videoId) {
+    return null;
+  }
+
+  const url = new URL("https://www.youtube.com/watch");
+  url.searchParams.set("v", videoId);
+  url.searchParams.set("ytwm_worker", "1");
+  return url.toString();
+}
+
+function openWorkerWindow(workerUrl) {
+  if (!workerUrl) {
+    return null;
+  }
+
+  const features = [
+    "popup=yes",
+    `left=${WORKER_WINDOW_BOUNDS.left}`,
+    `top=${WORKER_WINDOW_BOUNDS.top}`,
+    `width=${WORKER_WINDOW_BOUNDS.width}`,
+    `height=${WORKER_WINDOW_BOUNDS.height}`
+  ].join(",");
+
+  try {
+    return window.open(workerUrl, `ytwm-worker-${Date.now()}`, features);
+  } catch (_error) {
+    return null;
+  }
+}
+
 function createMenuItem() {
   const item = document.createElement("button");
   item.type = "button";
   item.className = MENU_ITEM_CLASS;
   item.setAttribute("role", "menuitem");
+  item.dataset.youtubeWatchedMarkerBusy = "false";
 
   const icon = document.createElement("span");
   icon.className = "youtube-watched-marker-icon";
@@ -226,53 +286,107 @@ function createMenuItem() {
 
   item.append(icon, label);
 
-  const handleClick = async (event) => {
+  const activate = async (event) => {
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
 
+    if (item.dataset.youtubeWatchedMarkerBusy === "true") {
+      return;
+    }
+
+    item.dataset.youtubeWatchedMarkerBusy = "true";
     const url = lastMenuVideoUrl || getFallbackVideoUrl();
     const title = lastMenuVideoTitle || document.title.replace(/ - YouTube$/, "").trim();
 
     if (!url) {
       setMenuItemText(item, "No video found");
+      item.dataset.youtubeWatchedMarkerBusy = "false";
       return;
     }
 
-    setMenuItemText(item, "Adding...");
+    const workerUrl = buildWorkerUrl(url);
+    const openedWorkerWindow = pendingOpenedWorkerUrl === workerUrl
+      ? pendingOpenedWorkerWindow
+      : null;
+    pendingOpenedWorkerWindow = null;
+    pendingOpenedWorkerUrl = null;
+    setMenuItemText(item, openedWorkerWindow ? "Adding..." : "Opening...");
 
     try {
       const response = await extensionApi.runtime.sendMessage({
-        type: "enqueue-video-url",
+        type: openedWorkerWindow ? "enqueue-video-url-with-opened-worker" : "enqueue-video-url",
         url,
-        title
+        title,
+        workerUrl
       });
 
       if (response && response.ok === false) {
+        if (openedWorkerWindow) {
+          openedWorkerWindow.close();
+        }
         setMenuItemText(item, response.error === "queue-limit-reached"
           ? `Queue limit ${response.maxQueueSize}`
           : "Could not add video");
+        item.dataset.youtubeWatchedMarkerBusy = "false";
         return;
       }
 
       setMenuItemText(item, response && response.created
         ? "Added to watch queue"
         : "Already in watch queue");
+      if (openedWorkerWindow && response && !response.created) {
+        openedWorkerWindow.close();
+      }
       closeYouTubeMenu(item);
     } catch (error) {
+      if (openedWorkerWindow) {
+        openedWorkerWindow.close();
+      }
       console.error(error);
       setMenuItemText(item, "Could not add video");
+      item.dataset.youtubeWatchedMarkerBusy = "false";
     }
   };
 
-  item.addEventListener("pointerdown", (event) => {
+  const handlePointerDown = (event) => {
     event.stopPropagation();
-  });
+    event.stopImmediatePropagation();
+
+    if (item.dataset.youtubeWatchedMarkerBusy === "true") {
+      return;
+    }
+
+    const url = lastMenuVideoUrl || getFallbackVideoUrl();
+    const workerUrl = buildWorkerUrl(url);
+
+    if (!workerUrl || pendingOpenedWorkerWindow) {
+      return;
+    }
+
+    pendingOpenedWorkerUrl = workerUrl;
+    pendingOpenedWorkerWindow = openWorkerWindow(workerUrl);
+  };
+
+  const stopPointerEvent = (event) => {
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+  };
+
+  item.addEventListener("pointerdown", handlePointerDown);
+  item.addEventListener("mousedown", stopPointerEvent);
+  item.addEventListener("mouseup", stopPointerEvent);
+  item.addEventListener("pointerup", activate);
   item.addEventListener("pointerenter", () => setMenuItemHover(item, true));
   item.addEventListener("pointerleave", () => setMenuItemHover(item, false));
   item.addEventListener("focus", () => setMenuItemHover(item, true));
   item.addEventListener("blur", () => setMenuItemHover(item, false));
-  item.addEventListener("click", handleClick);
+  item.addEventListener("click", activate);
+  item.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      activate(event).catch(console.error);
+    }
+  });
 
   return item;
 }

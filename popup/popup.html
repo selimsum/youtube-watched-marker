@@ -26,7 +26,7 @@
 
       <section id="settingsPanel" class="settings" aria-label="Worker settings" hidden>
         <p class="settings-warning">
-          Marking opens YouTube videos briefly in a muted worker window while signed in.
+          Marking opens YouTube briefly in a muted worker browser window while signed in.
         </p>
         <label class="field worker-field" title="Choose where the temporary YouTube playback worker opens. Secondary window is recommended for desktop use.">
           <span>Worker</span>
@@ -59,6 +59,7 @@
         <div class="settings-actions">
           <button id="pauseButton" type="button" title="Pause or resume automatic processing. New videos can still be added while paused.">Pause queue</button>
           <button id="resetWindowButton" type="button" title="Forget the saved worker-window position and use the default secondary-monitor placement next time.">Reset window</button>
+          <button id="saveWindowButton" type="button" title="Save the current worker window position and size. Open a worker, move it where you want, then click this before it closes.">Save window</button>
           <button id="stopButton" type="button" title="Close the currently running worker and mark that queue item as stopped.">Stop</button>
           <button id="retryFailedButton" type="button" title="Move failed items back to pending, up to the active queue limit.">Retry failed</button>
           <button id="clearCompletedButton" type="button" title="Remove completed items from the queue history.">Clear done</button>

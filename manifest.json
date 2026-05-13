@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "YouTube Watched Marker",
-  "version": "0.1.4",
+  "version": "0.1.17",
   "description": "Queues YouTube videos and briefly plays them in a worker window to simulate watched playback.",
   "permissions": [
     "contextMenus",

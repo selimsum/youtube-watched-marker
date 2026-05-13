@@ -1,18 +1,18 @@
 # YouTube Watched Marker
 
-Firefox-first WebExtension prototype for queuing YouTube videos that a later phase will try to mark as watched through controlled playback.
+Firefox-first WebExtension for queuing YouTube videos and simulating watched playback in a short-lived worker window.
 
-## Phase 1 behavior
+## Behavior
 
 - Adds a Firefox context menu item named **Mark as watched** on YouTube pages and links.
 - Adds **Mark as watched** to YouTube's own video three-dot menus.
 - Extracts video IDs from `youtube.com/watch?v=...`, `youtube.com/shorts/...`, `youtube.com/embed/...`, `youtube.com/live/...`, and `youtu.be/...`.
 - Stores each video once in a local queue.
-- Opens one queued video at a time in a dedicated worker window on the secondary display.
-- Defaults the worker window to `1280x720` at `left=1920, top=0`, and remembers the last moved position.
+- Opens one queued video at a time in a dedicated worker browser window.
+- Defaults the worker window to `1280x720` at `left=2176, top=144`, based on the tested secondary-screen preset for a 4K 200% primary monitor with a 1920x1080 125% laptop monitor to the right.
 - Requests the lowest available YouTube playback quality when the page exposes a compatible player API.
 - Seeks near the last 30 seconds, plays for 5 seconds, then closes the tab.
-- Starts playback in the worker window, then returns focus to the previous tab while the 5-second run continues.
+- Starts playback in the worker browser window, then returns focus to the previous tab while the 5-second run continues.
 - Shows the queue in the extension popup.
 - Shows video titles in the popup when YouTube exposes them.
 - Marks each local queue item as `pending`, `running`, `completed`, or `failed`.
@@ -20,8 +20,8 @@ Firefox-first WebExtension prototype for queuing YouTube videos that a later pha
 - Includes a popup debug toggle for playback event timelines and an export button for a JSON debug log.
 - Includes popup controls for worker mode, playback seconds, seek distance from the end, low-quality requests, stopping the active worker, retrying failed items, and clearing completed/failed items.
 - Includes a queue pause/resume control and a configurable active queue limit.
-- Shows a popup warning that marking opens YouTube videos briefly in a muted worker window while signed in.
-- Includes a reset button for the remembered worker window bounds.
+- Shows a popup warning that marking opens a muted worker browser window while signed in.
+- Includes reset/save buttons for the remembered worker window bounds.
 - Uses a stable Firefox add-on ID: `youtube-watched-marker@example.com`.
 
 ## Load in Firefox

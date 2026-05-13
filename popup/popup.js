@@ -24,6 +24,7 @@ const lowQualityEnabled = document.getElementById("lowQualityEnabled");
 const windowBounds = document.getElementById("windowBounds");
 const pauseButton = document.getElementById("pauseButton");
 const resetWindowButton = document.getElementById("resetWindowButton");
+const saveWindowButton = document.getElementById("saveWindowButton");
 const stopButton = document.getElementById("stopButton");
 const retryFailedButton = document.getElementById("retryFailedButton");
 const clearCompletedButton = document.getElementById("clearCompletedButton");
@@ -352,6 +353,22 @@ resetWindowButton.addEventListener("click", async () => {
     type: "reset-worker-window-bounds"
   });
   await loadSettings();
+});
+
+saveWindowButton.addEventListener("click", async () => {
+  const response = await extensionApi.runtime.sendMessage({
+    type: "save-current-worker-window-bounds"
+  });
+  await loadSettings();
+
+  if (response && response.ok === false) {
+    windowBounds.textContent = "No worker window found. Start one, move it, then save.";
+  } else {
+    windowBounds.textContent = "Worker window position saved.";
+    setTimeout(() => {
+      loadSettings().catch(console.error);
+    }, 1200);
+  }
 });
 
 stopButton.addEventListener("click", () => {
