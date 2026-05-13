@@ -11,6 +11,7 @@ const SEEK_FROM_END_SECONDS_KEY = "seekFromEndSeconds";
 const LOW_QUALITY_ENABLED_KEY = "lowQualityEnabled";
 const QUEUE_PAUSED_KEY = "queuePaused";
 const MAX_QUEUE_SIZE_KEY = "maxQueueSize";
+const WAITING_FOR_DIRECT_OPEN_KEY = "waitingForDirectOpen";
 const VIDEO_ID_PATTERN = /^[a-zA-Z0-9_-]{11}$/;
 const DEFAULT_PLAYBACK_SECONDS = 5;
 const DEFAULT_SEEK_FROM_END_SECONDS = 30;
@@ -36,6 +37,7 @@ const RIGHT_MONITOR_MAX_LEFT = 2300;
 const DEFAULT_WORKER_MODE = "window";
 
 let activeWorker = null;
+let retainedWorker = null;
 
 function getExtensionApi() {
   if (typeof browser !== "undefined") {
@@ -148,7 +150,8 @@ async function getSettings() {
     SEEK_FROM_END_SECONDS_KEY,
     LOW_QUALITY_ENABLED_KEY,
     QUEUE_PAUSED_KEY,
-    MAX_QUEUE_SIZE_KEY
+    MAX_QUEUE_SIZE_KEY,
+    WAITING_FOR_DIRECT_OPEN_KEY
   ]);
 
   return {
@@ -177,7 +180,10 @@ async function getSettings() {
       DEFAULT_MAX_QUEUE_SIZE,
       1,
       100
-    )
+    ),
+    waitingForDirectOpen: typeof result[WAITING_FOR_DIRECT_OPEN_KEY] === "boolean"
+      ? result[WAITING_FOR_DIRECT_OPEN_KEY]
+      : false
   };
 }
 
@@ -239,6 +245,10 @@ async function updateSettings(patch) {
     );
   }
 
+  if (Object.prototype.hasOwnProperty.call(patch, "waitingForDirectOpen")) {
+    nextValues[WAITING_FOR_DIRECT_OPEN_KEY] = Boolean(patch.waitingForDirectOpen);
+  }
+
   if (Object.keys(nextValues).length) {
     await extensionApi.storage.local.set(nextValues);
   }
@@ -264,6 +274,23 @@ async function enqueueVideo(videoId, sourceUrl, title, extra) {
   );
 
   if (existingActive) {
+    if (extra && extra.openedWorkerUrl) {
+      const updatedItem = await updateQueueItem(existingActive.id, {
+        openedWorkerUrl: extra.openedWorkerUrl,
+        targetWorkerUrl: extra.targetWorkerUrl || null,
+        workerStatus: null
+      });
+      await extensionApi.storage.local.set({
+        [WAITING_FOR_DIRECT_OPEN_KEY]: false
+      });
+
+      return {
+        item: updatedItem || existingActive,
+        ok: true,
+        created: false
+      };
+    }
+
     return {
       item: existingActive,
       ok: true,
@@ -286,6 +313,12 @@ async function enqueueVideo(videoId, sourceUrl, title, extra) {
   queue.unshift(item);
   await setQueue(queue);
 
+  if (extra && extra.openedWorkerUrl) {
+    await extensionApi.storage.local.set({
+      [WAITING_FOR_DIRECT_OPEN_KEY]: false
+    });
+  }
+
   return {
     item,
     ok: true,
@@ -301,6 +334,11 @@ async function clearQueue() {
   if (activeWorker) {
     await closeWorkerQuietly(activeWorker);
     activeWorker = null;
+  }
+
+  if (retainedWorker) {
+    await closeWorkerQuietly(retainedWorker);
+    retainedWorker = null;
   }
 
   await setQueue([]);
@@ -342,6 +380,7 @@ async function retryQueueItem(itemId) {
       playbackMode: null,
       debugSummary: null,
       openedWorkerUrl: null,
+      targetWorkerUrl: null,
       debugEvents: [],
       startedAt: null,
       completedAt: null,
@@ -377,6 +416,7 @@ async function retryQueueByStatus(status) {
       playbackMode: null,
       debugSummary: null,
       openedWorkerUrl: null,
+      targetWorkerUrl: null,
       debugEvents: [],
       startedAt: null,
       completedAt: null,
@@ -397,19 +437,91 @@ async function clearQueueByStatus(status) {
 }
 
 async function stopCurrentWorker() {
-  if (!activeWorker) {
+  if (!activeWorker && !retainedWorker) {
     return false;
   }
 
-  const itemId = activeWorker.itemId;
-  await closeWorkerQuietly(activeWorker);
-  activeWorker = null;
-  await updateQueueItem(itemId, {
-    status: "failed",
-    completedAt: new Date().toISOString(),
-    error: "stopped-by-user"
-  });
+  if (activeWorker) {
+    const itemId = activeWorker.itemId;
+    await closeWorkerQuietly(activeWorker);
+    activeWorker = null;
+    await updateQueueItem(itemId, {
+      status: "failed",
+      completedAt: new Date().toISOString(),
+      error: "stopped-by-user"
+    });
+  }
+
+  if (retainedWorker) {
+    await closeWorkerQuietly(retainedWorker);
+    retainedWorker = null;
+  }
+
   return true;
+}
+
+async function hasPendingQueueItems() {
+  const queue = await getQueue();
+  return queue.some((entry) => entry.status === "pending");
+}
+
+async function retainWorkerForNextItem(worker) {
+  if (!worker || !worker.windowId || !worker.tabId) {
+    return false;
+  }
+
+  try {
+    const tab = await extensionApi.tabs.get(worker.tabId);
+    const workerWindow = await extensionApi.windows.get(worker.windowId);
+    retainedWorker = {
+      windowId: worker.windowId,
+      tabId: worker.tabId,
+      requestedBounds: worker.requestedBounds || normalizeWorkerBounds({
+        left: workerWindow.left,
+        top: workerWindow.top,
+        width: workerWindow.width,
+        height: workerWindow.height
+      })
+    };
+    await extensionApi.tabs.update(tab.id, {
+      muted: true
+    }).catch(() => {});
+    return true;
+  } catch (_error) {
+    retainedWorker = null;
+    return false;
+  }
+}
+
+async function useRetainedWorkerWindow(url) {
+  if (!retainedWorker || !retainedWorker.windowId || !retainedWorker.tabId) {
+    return null;
+  }
+
+  const worker = retainedWorker;
+  retainedWorker = null;
+
+  try {
+    const tab = await extensionApi.tabs.update(worker.tabId, {
+      url,
+      active: true,
+      muted: true
+    });
+    await extensionApi.windows.update(worker.windowId, {
+      focused: true
+    }).catch(() => {});
+    await delay(250);
+
+    return {
+      windowId: worker.windowId,
+      tab,
+      requestedBounds: worker.requestedBounds,
+      reused: true
+    };
+  } catch (_error) {
+    await closeWorkerQuietly(worker);
+    return null;
+  }
 }
 
 async function updateQueueItem(itemId, patch) {
@@ -428,7 +540,29 @@ function buildWatchUrl(videoId) {
   const url = new URL("https://www.youtube.com/watch");
   url.searchParams.set("v", videoId);
   url.searchParams.set("ytwm_worker", "1");
+  url.searchParams.set("mute", "1");
+  url.searchParams.set("autoplay", "0");
   return url.toString();
+}
+
+function isWorkerWatchUrl(url) {
+  const parsedUrl = normalizeUrl(url);
+
+  return Boolean(
+    parsedUrl &&
+    isYouTubeHost(parsedUrl.hostname) &&
+    parsedUrl.searchParams.get("ytwm_worker") === "1"
+  );
+}
+
+async function muteWorkerTabIfNeeded(tabId, url) {
+  if (!tabId || !isWorkerWatchUrl(url)) {
+    return;
+  }
+
+  await extensionApi.tabs.update(tabId, {
+    muted: true
+  }).catch(() => {});
 }
 
 async function refreshBadge() {
@@ -456,10 +590,33 @@ function notifyPopup(message) {
 
 async function notifyQueueUpdated(extra) {
   await refreshBadge();
+  await notifyContentQueueState();
   notifyPopup({
     type: "queue-updated",
     ...(extra || {})
   });
+}
+
+async function notifyContentQueueState() {
+  const queue = await getQueue();
+  const settings = await getSettings();
+  const state = {
+    type: "queue-state",
+    activeCount: getActiveQueueCount(queue),
+    hasActiveWorker: Boolean(activeWorker || retainedWorker),
+    queuePaused: settings.queuePaused,
+    waitingForDirectOpen: settings.waitingForDirectOpen
+  };
+  const tabs = await extensionApi.tabs.query({
+    url: [
+      "*://www.youtube.com/*",
+      "*://m.youtube.com/*"
+    ]
+  });
+
+  await Promise.all(tabs.map((tab) => (
+    extensionApi.tabs.sendMessage(tab.id, state).catch(() => {})
+  )));
 }
 
 async function handleMenuClick(info, tab) {
@@ -529,7 +686,8 @@ async function handleRuntimeMessage(message) {
 
     const expectedWorkerUrl = buildWatchUrl(videoId);
     const result = await enqueueVideo(videoId, message.url, message.title, {
-      openedWorkerUrl: message.workerUrl || expectedWorkerUrl
+      openedWorkerUrl: message.openedWorkerUrl || message.workerUrl || expectedWorkerUrl,
+      targetWorkerUrl: message.workerUrl || expectedWorkerUrl
     });
 
     if (!result.ok) {
@@ -552,6 +710,18 @@ async function handleRuntimeMessage(message) {
   if (message.type === "get-queue") {
     return {
       queue: await getQueue()
+    };
+  }
+
+  if (message.type === "get-queue-state") {
+    const queue = await getQueue();
+    const settings = await getSettings();
+
+    return {
+      activeCount: getActiveQueueCount(queue),
+      hasActiveWorker: Boolean(activeWorker || retainedWorker),
+      queuePaused: settings.queuePaused,
+      waitingForDirectOpen: settings.waitingForDirectOpen
     };
   }
 
@@ -859,11 +1029,14 @@ async function findCurrentWorkerWindowId() {
     return activeWorker.windowId;
   }
 
+  if (retainedWorker && retainedWorker.windowId) {
+    return retainedWorker.windowId;
+  }
+
   const tabs = await extensionApi.tabs.query({
     url: [
       "*://www.youtube.com/watch*ytwm_worker=1*",
-      "*://m.youtube.com/watch*ytwm_worker=1*",
-      WORKER_IDLE_URL
+      "*://m.youtube.com/watch*ytwm_worker=1*"
     ]
   });
   const workerTab = tabs.find((tab) => tab.windowId);
@@ -928,19 +1101,39 @@ async function findOpenedWorkerTab(workerUrl) {
   }
 
   for (let attempt = 0; attempt < 20; attempt += 1) {
-    const tabs = await extensionApi.tabs.query({
-      url: workerUrl
-    });
-    const tab = tabs.find((candidate) => candidate.id && candidate.windowId);
+    const tabs = await extensionApi.tabs.query({});
+    const matchingTab = tabs.find((candidate) => (
+      candidate.id &&
+      candidate.windowId &&
+      urlsMatchIgnoringEncoding(candidate.url || candidate.pendingUrl, workerUrl)
+    ));
 
-    if (tab) {
-      return tab;
+    if (matchingTab) {
+      return matchingTab;
     }
 
     await delay(250);
   }
 
   return null;
+}
+
+function urlsMatchIgnoringEncoding(actualUrl, expectedUrl) {
+  if (!actualUrl || !expectedUrl) {
+    return false;
+  }
+
+  if (actualUrl === expectedUrl) {
+    return true;
+  }
+
+  try {
+    const actual = new URL(actualUrl);
+    const expected = new URL(expectedUrl);
+    return actual.href === expected.href;
+  } catch (_error) {
+    return false;
+  }
 }
 
 async function forceWorkerWindowBoundsRepeatedly(windowId, bounds) {
@@ -1263,10 +1456,43 @@ async function runQueueItem(item) {
     const settings = await getSettings();
 
     if (settings.workerMode === "window") {
-      tab = await findOpenedWorkerTab(item.openedWorkerUrl);
+      const targetUrl = item.targetWorkerUrl || buildWatchUrl(item.videoId);
+      workerWindow = await useRetainedWorkerWindow(targetUrl);
+
+      if (workerWindow) {
+        tab = workerWindow.tab;
+        workerWindowId = workerWindow.windowId;
+        await updateQueueItemWithDebug(item.id, {}, {
+          event: `worker-window-reused-${formatBounds(workerWindow.requestedBounds)}`,
+          elapsedMs: null
+        }).catch(() => {});
+      } else if (!item.openedWorkerUrl) {
+        await updateQueueItemWithDebug(item.id, {
+          workerStatus: "waiting-for-direct-window-open"
+        }, {
+          event: "waiting-for-direct-window-open",
+          elapsedMs: null
+        }).catch(() => {});
+        await extensionApi.storage.local.set({
+          [WAITING_FOR_DIRECT_OPEN_KEY]: true
+        });
+        await notifyContentQueueState();
+        return;
+      } else {
+        tab = await findOpenedWorkerTab(item.openedWorkerUrl);
+      }
 
       if (tab) {
         workerWindowId = tab.windowId;
+
+        if (!isWorkerWatchUrl(tab.url || tab.pendingUrl)) {
+          tab = await extensionApi.tabs.update(tab.id, {
+            url: targetUrl,
+            active: true,
+            muted: true
+          });
+        }
+
         const openedWindow = await extensionApi.windows.get(workerWindowId);
         workerWindow = {
           windowId: workerWindowId,
@@ -1284,18 +1510,17 @@ async function runQueueItem(item) {
           elapsedMs: null
         }).catch(() => {});
       } else {
-        workerWindow = await createWorkerWindow(buildWatchUrl(item.videoId));
-        tab = workerWindow.tab;
-        workerWindowId = workerWindow.windowId;
-        await updateQueueItemWithDebug(item.id, {}, {
-          event: `window-bounds-requested-${formatBounds(workerWindow.requestedBounds)}`,
+        await updateQueueItemWithDebug(item.id, {
+          workerStatus: "waiting-for-direct-window-open"
+        }, {
+          event: "direct-window-not-found-waiting",
           elapsedMs: null
         }).catch(() => {});
-        rememberOpenedWorkerWindowBounds(
-          item.id,
-          workerWindowId,
-          workerWindow.requestedBounds
-        ).catch(() => {});
+        await extensionApi.storage.local.set({
+          [WAITING_FOR_DIRECT_OPEN_KEY]: true
+        });
+        await notifyContentQueueState();
+        return;
       }
     } else {
       tab = await extensionApi.tabs.create({
@@ -1368,7 +1593,16 @@ async function runQueueItem(item) {
     await notifyQueueUpdated({ item: failedItem });
   } finally {
     if (activeWorker) {
-      await closeWorkerQuietly(activeWorker);
+      const settings = await getSettings();
+      const shouldRetainWorker = (
+        settings.workerMode === "window" &&
+        await hasPendingQueueItems() &&
+        await retainWorkerForNextItem(activeWorker)
+      );
+
+      if (!shouldRetainWorker) {
+        await closeWorkerQuietly(activeWorker);
+      }
     } else if (workerWindowId) {
       await closeWorkerQuietly({ windowId: workerWindowId, tabId: tab && tab.id });
     } else if (tab && tab.id) {
@@ -1376,7 +1610,24 @@ async function runQueueItem(item) {
     }
 
     activeWorker = null;
+    await armDirectOpenForPendingWindowQueue();
   }
+}
+
+async function armDirectOpenForPendingWindowQueue() {
+  const settings = await getSettings();
+
+  if (settings.workerMode !== "window" || settings.queuePaused) {
+    return;
+  }
+
+  const queue = await getQueue();
+  const hasPending = queue.some((entry) => entry.status === "pending");
+
+  await extensionApi.storage.local.set({
+    [WAITING_FOR_DIRECT_OPEN_KEY]: hasPending && !retainedWorker
+  });
+  await notifyContentQueueState();
 }
 
 async function resetStaleRunningItems() {
@@ -1410,7 +1661,11 @@ async function processQueue() {
   const settings = await getSettings();
 
   if (settings.queuePaused) {
+    await extensionApi.storage.local.set({
+      [WAITING_FOR_DIRECT_OPEN_KEY]: false
+    });
     await refreshBadge();
+    await notifyContentQueueState();
     return;
   }
 
@@ -1418,7 +1673,16 @@ async function processQueue() {
   const item = queue.find((entry) => entry.status === "pending");
 
   if (!item) {
+    if (retainedWorker) {
+      await closeWorkerQuietly(retainedWorker);
+      retainedWorker = null;
+    }
+
+    await extensionApi.storage.local.set({
+      [WAITING_FOR_DIRECT_OPEN_KEY]: false
+    });
     await refreshBadge();
+    await notifyContentQueueState();
     return;
   }
 
@@ -1437,7 +1701,7 @@ function registerContextMenu() {
     extensionApi.contextMenus.create({
       id: PAGE_MENU_ID,
       title: "Mark as watched",
-      contexts: ["page", "video"],
+      contexts: ["video"],
       documentUrlPatterns: [
         "*://www.youtube.com/*",
         "*://m.youtube.com/*",
@@ -1472,6 +1736,14 @@ extensionApi.contextMenus.onClicked.addListener((info, tab) => {
   if (MENU_IDS.includes(info.menuItemId)) {
     handleMenuClick(info, tab).catch(console.error);
   }
+});
+
+extensionApi.tabs.onCreated.addListener((tab) => {
+  muteWorkerTabIfNeeded(tab.id, tab.url || tab.pendingUrl).catch(console.error);
+});
+
+extensionApi.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  muteWorkerTabIfNeeded(tabId, changeInfo.url || (tab && tab.url)).catch(console.error);
 });
 
 extensionApi.runtime.onMessage.addListener((message) => {

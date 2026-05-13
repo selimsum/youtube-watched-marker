@@ -2,9 +2,9 @@
 
 const MENU_ITEM_CLASS = "youtube-watched-marker-menu-item";
 const MENU_ITEM_SELECTOR = `.${MENU_ITEM_CLASS}`;
-const MENU_LIST_MARKER = "youtubeWatchedMarkerInjected";
-const HIDDEN_ITEM_CLASS = "youtube-watched-marker-hidden-native-item";
-const MENU_ITEM_HOVER_BACKGROUND = "var(--yt-spec-10-percent-layer, rgba(0, 0, 0, 0.1))";
+const CARD_BUTTON_CLASS = "youtube-watched-marker-card-button";
+const CARD_BUTTON_SELECTOR = `.${CARD_BUTTON_CLASS}`;
+const MENU_ITEM_HOVER_BACKGROUND = "var(--yt-spec-badge-chip-background, rgba(0, 0, 0, 0.06))";
 const WORKER_WINDOW_BOUNDS = {
   left: 2176,
   top: 144,
@@ -16,6 +16,8 @@ let lastMenuVideoUrl = null;
 let lastMenuVideoTitle = "";
 let pendingOpenedWorkerWindow = null;
 let pendingOpenedWorkerUrl = null;
+let canOpenWorkerWindow = true;
+let overlayMenuItem = null;
 
 function getExtensionApi() {
   if (typeof browser !== "undefined") {
@@ -26,6 +28,25 @@ function getExtensionApi() {
 }
 
 const extensionApi = getExtensionApi();
+
+function updateDirectOpenState(state) {
+  canOpenWorkerWindow = Boolean(
+    state &&
+    state.activeCount === 0 &&
+    !state.hasActiveWorker &&
+    !state.queuePaused
+  );
+}
+
+extensionApi.runtime.sendMessage({ type: "get-queue-state" })
+  .then(updateDirectOpenState)
+  .catch(() => {});
+
+extensionApi.runtime.onMessage.addListener((message) => {
+  if (message && message.type === "queue-state") {
+    updateDirectOpenState(message);
+  }
+});
 
 function absoluteUrl(value) {
   if (!value) {
@@ -59,6 +80,9 @@ function findVideoUrlInContainer(container) {
     "a#thumbnail[href]",
     "a#video-title[href]",
     "a#video-title-link[href]",
+    "a.yt-lockup-metadata-view-model__title[href]",
+    "a.yt-simple-endpoint[href]",
+    "a[href*='watch?v=']",
     "a[href*='/watch?v=']",
     "a[href^='/shorts/']",
     "a[href*='/shorts/']",
@@ -81,6 +105,10 @@ function findVideoUrlInContainer(container) {
 function getVideoContainer(element) {
   return element && element.closest && element.closest([
     "ytd-rich-item-renderer",
+    "ytd-rich-grid-media",
+    "ytd-rich-grid-slim-media",
+    "yt-lockup-view-model",
+    "yt-lockup-metadata-view-model",
     "ytd-video-renderer",
     "ytd-compact-video-renderer",
     "ytd-grid-video-renderer",
@@ -90,6 +118,34 @@ function getVideoContainer(element) {
     "ytd-channel-video-player-renderer",
     "ytd-watch-flexy"
   ].join(","));
+}
+
+function getVideoContainers(root) {
+  const selector = [
+    "ytd-rich-item-renderer",
+    "ytd-rich-grid-media",
+    "ytd-rich-grid-slim-media",
+    "yt-lockup-view-model",
+    "yt-lockup-metadata-view-model",
+    "ytd-video-renderer",
+    "ytd-compact-video-renderer",
+    "ytd-grid-video-renderer",
+    "ytd-playlist-video-renderer",
+    "ytd-reel-item-renderer",
+    "ytd-radio-renderer"
+  ].join(",");
+
+  const containers = [];
+
+  if (root.nodeType === Node.ELEMENT_NODE && root.matches(selector)) {
+    containers.push(root);
+  }
+
+  if (root.querySelectorAll) {
+    containers.push(...root.querySelectorAll(selector));
+  }
+
+  return containers;
 }
 
 function getElementTitle(element) {
@@ -110,7 +166,9 @@ function findVideoTitleInContainer(container) {
   const selectors = [
     "a#video-title",
     "a#video-title-link",
+    "a.yt-lockup-metadata-view-model__title",
     "yt-formatted-string#video-title",
+    "h3 a",
     "#video-title",
     "h3",
     "h4",
@@ -174,6 +232,8 @@ function rememberMenuTarget(event) {
     node.nodeType === Node.ELEMENT_NODE &&
     (
       node.matches("ytd-menu-renderer") ||
+      node.matches("ytd-menu-button-renderer") ||
+      node.matches("yt-icon-button") ||
       node.matches("yt-button-shape") ||
       node.matches("button[aria-label]")
     )
@@ -268,6 +328,61 @@ function openWorkerWindow(workerUrl) {
   }
 }
 
+async function enqueueDirectOpen(url, title, item) {
+  const workerUrl = buildWorkerUrl(url);
+  let openedWorkerWindow = pendingOpenedWorkerUrl === workerUrl
+    ? pendingOpenedWorkerWindow
+    : null;
+
+  if (!openedWorkerWindow && canOpenWorkerWindow) {
+    openedWorkerWindow = openWorkerWindow(workerUrl);
+    if (openedWorkerWindow) {
+      canOpenWorkerWindow = false;
+    }
+  }
+
+  pendingOpenedWorkerWindow = null;
+  pendingOpenedWorkerUrl = null;
+
+  if (!openedWorkerWindow && canOpenWorkerWindow) {
+    throw new Error("worker-window-blocked");
+  }
+
+  const response = await extensionApi.runtime.sendMessage({
+    type: openedWorkerWindow ? "enqueue-video-url-with-opened-worker" : "enqueue-video-url",
+    url,
+    title,
+    workerUrl,
+    openedWorkerUrl: workerUrl
+  });
+
+  if (response && response.ok === false) {
+    if (openedWorkerWindow) {
+      openedWorkerWindow.close();
+    }
+    extensionApi.runtime.sendMessage({ type: "get-queue-state" })
+      .then(updateDirectOpenState)
+      .catch(() => {});
+    throw new Error(response.error || "enqueue-failed");
+  }
+
+  if (response && response.created) {
+    canOpenWorkerWindow = false;
+  }
+
+  if (openedWorkerWindow && response && !response.created) {
+    openedWorkerWindow.close();
+  }
+
+  if (item) {
+    setMenuItemText(item, response && response.created
+      ? "Added to watch queue"
+      : "Already in watch queue");
+  }
+
+  return response;
+}
+
 function createMenuItem() {
   const item = document.createElement("button");
   item.type = "button";
@@ -305,44 +420,12 @@ function createMenuItem() {
       return;
     }
 
-    const workerUrl = buildWorkerUrl(url);
-    const openedWorkerWindow = pendingOpenedWorkerUrl === workerUrl
-      ? pendingOpenedWorkerWindow
-      : null;
-    pendingOpenedWorkerWindow = null;
-    pendingOpenedWorkerUrl = null;
-    setMenuItemText(item, openedWorkerWindow ? "Adding..." : "Opening...");
+    setMenuItemText(item, pendingOpenedWorkerWindow ? "Adding..." : "Opening...");
 
     try {
-      const response = await extensionApi.runtime.sendMessage({
-        type: openedWorkerWindow ? "enqueue-video-url-with-opened-worker" : "enqueue-video-url",
-        url,
-        title,
-        workerUrl
-      });
-
-      if (response && response.ok === false) {
-        if (openedWorkerWindow) {
-          openedWorkerWindow.close();
-        }
-        setMenuItemText(item, response.error === "queue-limit-reached"
-          ? `Queue limit ${response.maxQueueSize}`
-          : "Could not add video");
-        item.dataset.youtubeWatchedMarkerBusy = "false";
-        return;
-      }
-
-      setMenuItemText(item, response && response.created
-        ? "Added to watch queue"
-        : "Already in watch queue");
-      if (openedWorkerWindow && response && !response.created) {
-        openedWorkerWindow.close();
-      }
+      await enqueueDirectOpen(url, title, item);
       closeYouTubeMenu(item);
     } catch (error) {
-      if (openedWorkerWindow) {
-        openedWorkerWindow.close();
-      }
       console.error(error);
       setMenuItemText(item, "Could not add video");
       item.dataset.youtubeWatchedMarkerBusy = "false";
@@ -357,6 +440,10 @@ function createMenuItem() {
       return;
     }
 
+    if (!canOpenWorkerWindow) {
+      return;
+    }
+
     const url = lastMenuVideoUrl || getFallbackVideoUrl();
     const workerUrl = buildWorkerUrl(url);
 
@@ -366,6 +453,10 @@ function createMenuItem() {
 
     pendingOpenedWorkerUrl = workerUrl;
     pendingOpenedWorkerWindow = openWorkerWindow(workerUrl);
+
+    if (pendingOpenedWorkerWindow) {
+      canOpenWorkerWindow = false;
+    }
   };
 
   const stopPointerEvent = (event) => {
@@ -391,13 +482,142 @@ function createMenuItem() {
   return item;
 }
 
+function createCardButton(container) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = CARD_BUTTON_CLASS;
+  button.title = "Mark as watched";
+  button.setAttribute("aria-label", "Mark as watched");
+  button.textContent = "+";
+
+  button.addEventListener("pointerdown", (event) => {
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+
+    if (!canOpenWorkerWindow || button.dataset.busy === "true") {
+      return;
+    }
+
+    const url = findVideoUrlInContainer(container);
+    const workerUrl = buildWorkerUrl(url);
+
+    if (!workerUrl || pendingOpenedWorkerWindow) {
+      return;
+    }
+
+    pendingOpenedWorkerUrl = workerUrl;
+    pendingOpenedWorkerWindow = openWorkerWindow(workerUrl);
+
+    if (pendingOpenedWorkerWindow) {
+      canOpenWorkerWindow = false;
+    }
+  });
+
+  button.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+
+    if (button.dataset.busy === "true") {
+      return;
+    }
+
+    const url = findVideoUrlInContainer(container);
+    const title = findVideoTitleInContainer(container);
+
+    if (!url) {
+      return;
+    }
+
+    button.dataset.busy = "true";
+    button.textContent = "...";
+
+    try {
+      await enqueueDirectOpen(url, title);
+      button.textContent = "✓";
+      setTimeout(() => {
+        button.textContent = "+";
+        button.dataset.busy = "false";
+      }, 1200);
+    } catch (_error) {
+      button.textContent = "!";
+      setTimeout(() => {
+        button.textContent = "+";
+        button.dataset.busy = "false";
+      }, 1600);
+    }
+  });
+
+  return button;
+}
+
+function styleCardButton(button) {
+  button.style.display = "inline-flex";
+  button.style.alignItems = "center";
+  button.style.justifyContent = "center";
+  button.style.width = "32px";
+  button.style.height = "32px";
+  button.style.minWidth = "32px";
+  button.style.flex = "0 0 32px";
+  button.style.alignSelf = "flex-start";
+  button.style.marginInlineStart = "auto";
+  button.style.marginInlineEnd = "4px";
+  button.style.marginTop = "0";
+  button.style.border = "0";
+  button.style.borderRadius = "50%";
+  button.style.background = "transparent";
+  button.style.color = "var(--yt-spec-text-primary, #0f0f0f)";
+  button.style.font = "700 22px/1 Roboto, Arial, sans-serif";
+  button.style.cursor = "pointer";
+}
+
+function injectCardButton(container) {
+  if (!findVideoUrlInContainer(container) || container.querySelector(CARD_BUTTON_SELECTOR)) {
+    return;
+  }
+
+  const menu = container.querySelector([
+    "ytd-menu-renderer",
+    "ytd-menu-button-renderer",
+    "yt-icon-button",
+    "yt-button-shape button[aria-label]",
+    "button[aria-label*='Action menu']",
+    "button[aria-label*='More actions']",
+    "button[aria-label*='Diğer']",
+    "button[aria-label*='Eylem']",
+    "#menu",
+    "#menu-button"
+  ].join(","));
+
+  if (!menu || !menu.parentElement) {
+    return;
+  }
+
+  const button = createCardButton(container);
+  styleCardButton(button);
+  menu.parentElement.style.display = "flex";
+  menu.parentElement.style.alignItems = "flex-start";
+  menu.parentElement.insertBefore(button, menu);
+}
+
+function scanVideoCards(root) {
+  for (const container of getVideoContainers(root)) {
+    injectCardButton(container);
+  }
+}
+
 function setMenuItemHover(item, active) {
   item.style.background = active ? MENU_ITEM_HOVER_BACKGROUND : "transparent";
+  item.style.opacity = "1";
+  item.style.color = "var(--yt-spec-text-primary, #0f0f0f)";
+
+  for (const child of item.children) {
+    child.style.opacity = "1";
+    child.style.color = "var(--yt-spec-text-primary, #0f0f0f)";
+  }
 }
 
 function closeYouTubeMenu(item) {
-  const menu = item.closest("ytd-menu-popup-renderer, tp-yt-paper-listbox, tp-yt-iron-dropdown, ytd-popup-container");
-  const list = item.parentElement;
   const escapeEvent = new KeyboardEvent("keydown", {
     key: "Escape",
     code: "Escape",
@@ -407,20 +627,11 @@ function closeYouTubeMenu(item) {
     cancelable: true
   });
 
-  if (list && list.dataset) {
-    delete list.dataset[MENU_LIST_MARKER];
-  }
-
-  restoreHiddenNativeItem(list);
-  item.remove();
+  removeOverlayMenuItem();
 
   window.dispatchEvent(escapeEvent);
   document.documentElement.dispatchEvent(escapeEvent);
   document.dispatchEvent(escapeEvent);
-
-  if (menu && menu.parentElement) {
-    menu.parentElement.dispatchEvent(escapeEvent);
-  }
 
   requestAnimationFrame(() => {
     document.body.dispatchEvent(new MouseEvent("click", {
@@ -496,85 +707,68 @@ function getMenuList(menu) {
 function injectIntoMenu(menu) {
   const list = getMenuList(menu);
 
-  if (!list || list.dataset[MENU_LIST_MARKER] === "true") {
-    return;
-  }
-
-  const popupRoot = list.closest("ytd-menu-popup-renderer, ytd-popup-container, tp-yt-iron-dropdown") || list;
-
-  if (popupRoot.querySelector(MENU_ITEM_SELECTOR)) {
-    list.dataset[MENU_LIST_MARKER] = "true";
-    return;
-  }
-
-  const item = createMenuItem();
-  styleMenuItem(item);
-  constrainMenuOverflow(list);
-  list.dataset[MENU_LIST_MARKER] = "true";
-  list.append(item);
-  compensateVerticalOverflow(list);
-}
-
-function constrainMenuOverflow(list) {
-  const containers = [
-    list,
-    list.closest("ytd-menu-popup-renderer"),
-    list.closest("tp-yt-paper-listbox"),
-    list.closest("tp-yt-iron-dropdown"),
-    list.closest("ytd-popup-container")
-  ].filter(Boolean);
-
-  for (const container of containers) {
-    container.style.overflowX = "hidden";
-    container.style.maxWidth = "100%";
-    container.style.boxSizing = "border-box";
-  }
-}
-
-function compensateVerticalOverflow(list) {
-  const container = list.closest("ytd-menu-popup-renderer, tp-yt-iron-dropdown, ytd-popup-container") || list;
-
-  requestAnimationFrame(() => {
-    if (!isVerticallyOverflowing(list) && !isVerticallyOverflowing(container)) {
-      return;
-    }
-
-    const nativeItems = Array.from(list.children).filter((child) => (
-      child.nodeType === Node.ELEMENT_NODE &&
-      !child.matches(MENU_ITEM_SELECTOR) &&
-      !child.classList.contains(HIDDEN_ITEM_CLASS) &&
-      child.getBoundingClientRect().height > 0
-    ));
-    const itemToHide = nativeItems[nativeItems.length - 1];
-
-    if (!itemToHide) {
-      return;
-    }
-
-    itemToHide.classList.add(HIDDEN_ITEM_CLASS);
-    itemToHide.dataset.youtubeWatchedMarkerPreviousDisplay = itemToHide.style.display || "";
-    itemToHide.style.display = "none";
-  });
-}
-
-function isVerticallyOverflowing(element) {
-  return Boolean(element && element.scrollHeight > element.clientHeight + 1);
-}
-
-function restoreHiddenNativeItem(list) {
   if (!list) {
     return;
   }
 
-  const hiddenItem = list.querySelector(`.${HIDDEN_ITEM_CLASS}`);
-
-  if (!hiddenItem) {
+  if (!hasNativeMenuItems(list) || !hasUsableMenuTarget()) {
+    removeOverlayMenuItem();
     return;
   }
 
-  hiddenItem.style.display = hiddenItem.dataset.youtubeWatchedMarkerPreviousDisplay || "";
-  delete hiddenItem.dataset.youtubeWatchedMarkerPreviousDisplay;
-  hiddenItem.classList.remove(HIDDEN_ITEM_CLASS);
+  showOverlayMenuItem(list);
+}
+
+function showOverlayMenuItem(list) {
+  if (!overlayMenuItem) {
+    overlayMenuItem = createMenuItem();
+    styleMenuItem(overlayMenuItem);
+    overlayMenuItem.style.position = "fixed";
+    overlayMenuItem.style.zIndex = "2147483647";
+    overlayMenuItem.style.boxShadow = "0 8px 24px rgba(0, 0, 0, 0.14)";
+    overlayMenuItem.style.borderRadius = "12px";
+    overlayMenuItem.style.background = "var(--yt-spec-base-background, #fff)";
+    document.documentElement.append(overlayMenuItem);
+  }
+
+  const rect = list.getBoundingClientRect();
+  const height = 48;
+  const gap = 6;
+  const topBelow = rect.bottom + gap;
+  const topAbove = rect.top - height - gap;
+  const top = topBelow + height <= window.innerHeight
+    ? topBelow
+    : Math.max(8, topAbove);
+
+  overlayMenuItem.style.left = `${Math.max(8, rect.left)}px`;
+  overlayMenuItem.style.top = `${top}px`;
+  overlayMenuItem.style.width = `${Math.max(220, rect.width)}px`;
+  overlayMenuItem.style.height = `${height}px`;
+}
+
+function removeOverlayMenuItem() {
+  if (overlayMenuItem) {
+    overlayMenuItem.remove();
+    overlayMenuItem = null;
+  }
+}
+
+function hasNativeMenuItems(list) {
+  return Array.from(list.querySelectorAll([
+    "[role='menuitem']",
+    "ytd-menu-service-item-renderer",
+    "ytd-toggle-menu-service-item-renderer",
+    "yt-list-item-view-model",
+    "button",
+    "a"
+  ].join(","))).some((child) => (
+    !child.matches(MENU_ITEM_SELECTOR) &&
+    child.getBoundingClientRect().height > 0
+  ));
+}
+
+function hasUsableMenuTarget() {
+  return Boolean(lastMenuVideoUrl || getFallbackVideoUrl());
 }
 
 function scanMenus(root) {
@@ -605,21 +799,38 @@ function scheduleMenuScan() {
   clearTimeout(scanTimer);
   scanTimer = setTimeout(() => {
     scanMenus(document.documentElement);
+    scanVideoCards(document.documentElement);
   }, 50);
 }
 
 document.addEventListener("pointerdown", rememberMenuTarget, true);
 document.addEventListener("mousedown", rememberMenuTarget, true);
 document.addEventListener("click", rememberMenuTarget, true);
+document.addEventListener("pointerdown", () => {
+  scheduleMenuScan();
+}, true);
 document.addEventListener("pointerup", () => {
   scheduleMenuScan();
+}, true);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    removeOverlayMenuItem();
+  }
+}, true);
+document.addEventListener("scroll", () => {
+  removeOverlayMenuItem();
 }, true);
 
 const observer = new MutationObserver((mutations) => {
   for (const mutation of mutations) {
     for (const node of mutation.addedNodes) {
       scanMenus(node);
+      scanVideoCards(node);
     }
+  }
+
+  if (overlayMenuItem && !document.querySelector("ytd-menu-popup-renderer, tp-yt-paper-listbox, tp-yt-iron-dropdown, ytd-popup-container, yt-list-view-model")) {
+    removeOverlayMenuItem();
   }
 });
 
@@ -629,3 +840,4 @@ observer.observe(document.documentElement, {
 });
 
 scanMenus(document.documentElement);
+scanVideoCards(document.documentElement);
