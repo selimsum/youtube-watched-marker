@@ -4,7 +4,10 @@ const MENU_ITEM_CLASS = "youtube-watched-marker-menu-item";
 const MENU_ITEM_SELECTOR = `.${MENU_ITEM_CLASS}`;
 const CARD_BUTTON_CLASS = "youtube-watched-marker-card-button";
 const CARD_BUTTON_SELECTOR = `.${CARD_BUTTON_CLASS}`;
-const MENU_ITEM_HOVER_BACKGROUND = "var(--yt-spec-badge-chip-background, rgba(0, 0, 0, 0.06))";
+const LIGHT_MENU_BACKGROUND = "rgb(255, 255, 255)";
+const DARK_MENU_BACKGROUND = "rgb(40, 40, 40)";
+const LIGHT_MENU_TEXT = "rgb(15, 15, 15)";
+const DARK_MENU_TEXT = "rgb(241, 241, 241)";
 const WORKER_WINDOW_BOUNDS = {
   left: 2176,
   top: 144,
@@ -17,6 +20,7 @@ let lastMenuVideoTitle = "";
 let pendingOpenedWorkerWindow = null;
 let pendingOpenedWorkerUrl = null;
 let canOpenWorkerWindow = true;
+let cardButtonsEnabled = true;
 let overlayMenuItem = null;
 
 function getExtensionApi() {
@@ -32,10 +36,22 @@ const extensionApi = getExtensionApi();
 function updateDirectOpenState(state) {
   canOpenWorkerWindow = Boolean(
     state &&
-    state.activeCount === 0 &&
     !state.hasActiveWorker &&
-    !state.queuePaused
+    !state.queuePaused &&
+    (
+      state.activeCount === 0 ||
+      state.waitingForDirectOpen
+    )
   );
+
+  if (state && typeof state.cardButtonsEnabled === "boolean") {
+    cardButtonsEnabled = state.cardButtonsEnabled;
+    if (!cardButtonsEnabled) {
+      removeCardButtons();
+    } else {
+      scheduleMenuScan();
+    }
+  }
 }
 
 extensionApi.runtime.sendMessage({ type: "get-queue-state" })
@@ -535,10 +551,10 @@ function createCardButton(container) {
     try {
       await enqueueDirectOpen(url, title);
       button.textContent = "✓";
-      setTimeout(() => {
-        button.textContent = "+";
-        button.dataset.busy = "false";
-      }, 1200);
+      button.dataset.busy = "false";
+      button.dataset.queued = "true";
+      button.setAttribute("aria-label", "Added to watch queue");
+      button.title = "Added to watch queue";
     } catch (_error) {
       button.textContent = "!";
       setTimeout(() => {
@@ -560,9 +576,9 @@ function styleCardButton(button) {
   button.style.minWidth = "32px";
   button.style.flex = "0 0 32px";
   button.style.alignSelf = "flex-start";
-  button.style.marginInlineStart = "auto";
-  button.style.marginInlineEnd = "4px";
-  button.style.marginTop = "0";
+  button.style.marginInlineStart = "0";
+  button.style.marginInlineEnd = "0";
+  button.style.marginTop = "2px";
   button.style.border = "0";
   button.style.borderRadius = "50%";
   button.style.background = "transparent";
@@ -571,12 +587,8 @@ function styleCardButton(button) {
   button.style.cursor = "pointer";
 }
 
-function injectCardButton(container) {
-  if (!findVideoUrlInContainer(container) || container.querySelector(CARD_BUTTON_SELECTOR)) {
-    return;
-  }
-
-  const menu = container.querySelector([
+function findCardMenu(container) {
+  return container.querySelector([
     "ytd-menu-renderer",
     "ytd-menu-button-renderer",
     "yt-icon-button",
@@ -588,33 +600,196 @@ function injectCardButton(container) {
     "#menu",
     "#menu-button"
   ].join(","));
+}
 
+function attachButtonToMenu(button, menu) {
   if (!menu || !menu.parentElement) {
+    return false;
+  }
+
+  styleCardButton(button);
+  menu.parentElement.style.display = "flex";
+  menu.parentElement.style.flexDirection = "column";
+  menu.parentElement.style.alignItems = "center";
+  menu.parentElement.append(button);
+  return true;
+}
+
+function injectCardButton(container) {
+  if (!cardButtonsEnabled) {
+    removeCardButtons();
     return;
   }
 
-  const button = createCardButton(container);
-  styleCardButton(button);
-  menu.parentElement.style.display = "flex";
-  menu.parentElement.style.alignItems = "flex-start";
-  menu.parentElement.insertBefore(button, menu);
-}
+  const existingButton = container.querySelector(CARD_BUTTON_SELECTOR);
+  if (existingButton) {
+    attachButtonToMenu(existingButton, findCardMenu(container));
+    return;
+  }
 
+  if (!findVideoUrlInContainer(container)) {
+    return;
+  }
+
+  const menu = findCardMenu(container);
+
+  if (menu) {
+    const button = createCardButton(container);
+    attachButtonToMenu(button, menu);
+  }
+}
 function scanVideoCards(root) {
+  if (!cardButtonsEnabled) {
+    removeCardButtons();
+    return;
+  }
+
   for (const container of getVideoContainers(root)) {
     injectCardButton(container);
   }
 }
 
+function removeCardButtons() {
+  for (const button of document.querySelectorAll(CARD_BUTTON_SELECTOR)) {
+    button.remove();
+  }
+}
+
 function setMenuItemHover(item, active) {
-  item.style.background = active ? MENU_ITEM_HOVER_BACKGROUND : "transparent";
+  const colors = getMenuColors();
+  item.style.background = active
+    ? colors.hoverBackground
+    : colors.background;
   item.style.opacity = "1";
-  item.style.color = "var(--yt-spec-text-primary, #0f0f0f)";
+  item.style.color = colors.text;
 
   for (const child of item.children) {
     child.style.opacity = "1";
-    child.style.color = "var(--yt-spec-text-primary, #0f0f0f)";
+    child.style.color = colors.text;
   }
+}
+
+function getMenuColors() {
+  const rootStyle = window.getComputedStyle(document.documentElement);
+  const isPageDark = isDarkThemeFromPage();
+  const text = normalizeCssColor(
+    rootStyle.getPropertyValue("--yt-spec-text-primary"),
+    isPageDark ? DARK_MENU_TEXT : LIGHT_MENU_TEXT
+  );
+  let background = normalizeCssColor(
+    rootStyle.getPropertyValue("--yt-spec-menu-background") ||
+      rootStyle.getPropertyValue("--yt-spec-base-background"),
+    isDarkColor(text) ? DARK_MENU_BACKGROUND : LIGHT_MENU_BACKGROUND
+  );
+  const textIsDark = isDarkColor(text);
+  const backgroundIsDark = isDarkColor(background);
+
+  if (textIsDark === backgroundIsDark || !hasReadableContrast(text, background)) {
+    background = textIsDark ? LIGHT_MENU_BACKGROUND : DARK_MENU_BACKGROUND;
+  }
+
+  return {
+    background,
+    hoverBackground: mixRgbColors(background, text, isDarkColor(background) ? 0.16 : 0.08),
+    text
+  };
+}
+
+function isDarkThemeFromPage() {
+  return document.documentElement.hasAttribute("dark") ||
+    document.querySelector("ytd-app[dark], ytd-page-manager[dark]");
+}
+
+function normalizeCssColor(value, fallback) {
+  const trimmed = String(value || "").trim();
+
+  if (!trimmed) {
+    return fallback;
+  }
+
+  const probe = document.createElement("span");
+  probe.style.color = trimmed;
+
+  if (!probe.style.color) {
+    return fallback;
+  }
+
+  document.documentElement.append(probe);
+  const color = window.getComputedStyle(probe).color || fallback;
+  probe.remove();
+  return color;
+}
+
+function parseRgbColor(value) {
+  const match = String(value).match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+
+  if (!match) {
+    return null;
+  }
+
+  return {
+    r: Number(match[1]),
+    g: Number(match[2]),
+    b: Number(match[3])
+  };
+}
+
+function isDarkColor(value) {
+  const rgb = parseRgbColor(value);
+
+  if (!rgb) {
+    return isDarkThemeFromPage();
+  }
+
+  return ((rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000) < 128;
+}
+
+function getRelativeLuminance(value) {
+  const rgb = parseRgbColor(value);
+
+  if (!rgb) {
+    return null;
+  }
+
+  const channel = (color) => {
+    const normalized = color / 255;
+    return normalized <= 0.03928
+      ? normalized / 12.92
+      : ((normalized + 0.055) / 1.055) ** 2.4;
+  };
+
+  return (0.2126 * channel(rgb.r)) +
+    (0.7152 * channel(rgb.g)) +
+    (0.0722 * channel(rgb.b));
+}
+
+function hasReadableContrast(foreground, background) {
+  const foregroundLuminance = getRelativeLuminance(foreground);
+  const backgroundLuminance = getRelativeLuminance(background);
+
+  if (foregroundLuminance === null || backgroundLuminance === null) {
+    return true;
+  }
+
+  const lighter = Math.max(foregroundLuminance, backgroundLuminance);
+  const darker = Math.min(foregroundLuminance, backgroundLuminance);
+
+  return (lighter + 0.05) / (darker + 0.05) >= 4.5;
+}
+
+function mixRgbColors(baseValue, overlayValue, amount) {
+  const base = parseRgbColor(baseValue);
+  const overlay = parseRgbColor(overlayValue);
+
+  if (!base || !overlay) {
+    return baseValue;
+  }
+
+  const mix = (baseChannel, overlayChannel) => Math.round(
+    baseChannel * (1 - amount) + overlayChannel * amount
+  );
+
+  return `rgb(${mix(base.r, overlay.r)}, ${mix(base.g, overlay.g)}, ${mix(base.b, overlay.b)})`;
 }
 
 function closeYouTubeMenu(item) {
@@ -656,7 +831,7 @@ function styleMenuItem(item) {
   item.style.minWidth = "0";
   item.style.minHeight = "40px";
   item.style.padding = "0 16px";
-  item.style.color = "var(--yt-spec-text-primary, #0f0f0f)";
+  item.style.color = getMenuColors().text;
   item.style.background = "transparent";
   item.style.border = "0";
   item.style.boxSizing = "border-box";
@@ -682,7 +857,7 @@ function styleMenuItem(item) {
     label.style.minWidth = "0";
     label.style.overflow = "hidden";
     label.style.textOverflow = "ellipsis";
-    label.style.color = "var(--yt-spec-text-primary, #0f0f0f)";
+    label.style.color = getMenuColors().text;
     label.style.whiteSpace = "nowrap";
   }
 }
@@ -725,13 +900,17 @@ function showOverlayMenuItem(list) {
     styleMenuItem(overlayMenuItem);
     overlayMenuItem.style.position = "fixed";
     overlayMenuItem.style.zIndex = "2147483647";
-    overlayMenuItem.style.boxShadow = "0 8px 24px rgba(0, 0, 0, 0.14)";
+    overlayMenuItem.style.boxShadow = "0 8px 24px rgba(0, 0, 0, 0.22)";
     overlayMenuItem.style.borderRadius = "12px";
-    overlayMenuItem.style.background = "var(--yt-spec-base-background, #fff)";
+    overlayMenuItem.style.overflow = "hidden";
     document.documentElement.append(overlayMenuItem);
   }
 
-  const rect = list.getBoundingClientRect();
+  const colors = getMenuColors();
+  overlayMenuItem.style.background = colors.background;
+  overlayMenuItem.style.color = colors.text;
+  const popup = list.closest("ytd-menu-popup-renderer, tp-yt-iron-dropdown, ytd-popup-container") || list;
+  const rect = popup.getBoundingClientRect();
   const height = 48;
   const gap = 6;
   const topBelow = rect.bottom + gap;
@@ -819,7 +998,11 @@ document.addEventListener("keydown", (event) => {
 }, true);
 document.addEventListener("scroll", () => {
   removeOverlayMenuItem();
+  scanVideoCards(document.documentElement);
 }, true);
+window.addEventListener("resize", () => {
+  scanVideoCards(document.documentElement);
+});
 
 const observer = new MutationObserver((mutations) => {
   for (const mutation of mutations) {

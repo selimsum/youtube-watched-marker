@@ -21,6 +21,7 @@ const playbackSeconds = document.getElementById("playbackSeconds");
 const seekFromEndSeconds = document.getElementById("seekFromEndSeconds");
 const maxQueueSize = document.getElementById("maxQueueSize");
 const lowQualityEnabled = document.getElementById("lowQualityEnabled");
+const cardButtonsEnabled = document.getElementById("cardButtonsEnabled");
 const windowBounds = document.getElementById("windowBounds");
 const pauseButton = document.getElementById("pauseButton");
 const resetWindowButton = document.getElementById("resetWindowButton");
@@ -216,6 +217,7 @@ function applySettings(settings) {
   seekFromEndSeconds.value = settings.seekFromEndSeconds || 30;
   maxQueueSize.value = settings.maxQueueSize || 20;
   lowQualityEnabled.checked = settings.lowQualityEnabled !== false;
+  cardButtonsEnabled.checked = settings.cardButtonsEnabled !== false;
   pauseButton.textContent = settings.queuePaused ? "Resume queue" : "Pause queue";
   windowBounds.textContent = formatWindowBounds(settings.workerWindowBounds);
   renderQueue(currentQueue);
@@ -338,6 +340,12 @@ maxQueueSize.addEventListener("change", async () => {
 lowQualityEnabled.addEventListener("change", async () => {
   await updateSettings({
     lowQualityEnabled: lowQualityEnabled.checked
+  });
+});
+
+cardButtonsEnabled.addEventListener("change", async () => {
+  await updateSettings({
+    cardButtonsEnabled: cardButtonsEnabled.checked
   });
 });
 

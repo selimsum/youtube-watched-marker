@@ -9,6 +9,7 @@ const WORKER_WINDOW_BOUNDS_KEY = "workerWindowBounds";
 const PLAYBACK_SECONDS_KEY = "playbackSeconds";
 const SEEK_FROM_END_SECONDS_KEY = "seekFromEndSeconds";
 const LOW_QUALITY_ENABLED_KEY = "lowQualityEnabled";
+const CARD_BUTTONS_ENABLED_KEY = "cardButtonsEnabled";
 const QUEUE_PAUSED_KEY = "queuePaused";
 const MAX_QUEUE_SIZE_KEY = "maxQueueSize";
 const WAITING_FOR_DIRECT_OPEN_KEY = "waitingForDirectOpen";
@@ -16,6 +17,7 @@ const VIDEO_ID_PATTERN = /^[a-zA-Z0-9_-]{11}$/;
 const DEFAULT_PLAYBACK_SECONDS = 5;
 const DEFAULT_SEEK_FROM_END_SECONDS = 30;
 const DEFAULT_LOW_QUALITY_ENABLED = true;
+const DEFAULT_CARD_BUTTONS_ENABLED = true;
 const DEFAULT_QUEUE_PAUSED = false;
 const DEFAULT_MAX_QUEUE_SIZE = 20;
 const WORKER_TIMEOUT_MS = 90000;
@@ -149,6 +151,7 @@ async function getSettings() {
     PLAYBACK_SECONDS_KEY,
     SEEK_FROM_END_SECONDS_KEY,
     LOW_QUALITY_ENABLED_KEY,
+    CARD_BUTTONS_ENABLED_KEY,
     QUEUE_PAUSED_KEY,
     MAX_QUEUE_SIZE_KEY,
     WAITING_FOR_DIRECT_OPEN_KEY
@@ -172,6 +175,9 @@ async function getSettings() {
     lowQualityEnabled: typeof result[LOW_QUALITY_ENABLED_KEY] === "boolean"
       ? result[LOW_QUALITY_ENABLED_KEY]
       : DEFAULT_LOW_QUALITY_ENABLED,
+    cardButtonsEnabled: typeof result[CARD_BUTTONS_ENABLED_KEY] === "boolean"
+      ? result[CARD_BUTTONS_ENABLED_KEY]
+      : DEFAULT_CARD_BUTTONS_ENABLED,
     queuePaused: typeof result[QUEUE_PAUSED_KEY] === "boolean"
       ? result[QUEUE_PAUSED_KEY]
       : DEFAULT_QUEUE_PAUSED,
@@ -230,6 +236,10 @@ async function updateSettings(patch) {
 
   if (Object.prototype.hasOwnProperty.call(patch, "lowQualityEnabled")) {
     nextValues[LOW_QUALITY_ENABLED_KEY] = Boolean(patch.lowQualityEnabled);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(patch, "cardButtonsEnabled")) {
+    nextValues[CARD_BUTTONS_ENABLED_KEY] = Boolean(patch.cardButtonsEnabled);
   }
 
   if (Object.prototype.hasOwnProperty.call(patch, "queuePaused")) {
@@ -605,6 +615,7 @@ async function notifyContentQueueState() {
     activeCount: getActiveQueueCount(queue),
     hasActiveWorker: Boolean(activeWorker || retainedWorker),
     queuePaused: settings.queuePaused,
+    cardButtonsEnabled: settings.cardButtonsEnabled,
     waitingForDirectOpen: settings.waitingForDirectOpen
   };
   const tabs = await extensionApi.tabs.query({
@@ -721,6 +732,7 @@ async function handleRuntimeMessage(message) {
       activeCount: getActiveQueueCount(queue),
       hasActiveWorker: Boolean(activeWorker || retainedWorker),
       queuePaused: settings.queuePaused,
+      cardButtonsEnabled: settings.cardButtonsEnabled,
       waitingForDirectOpen: settings.waitingForDirectOpen
     };
   }
@@ -740,6 +752,7 @@ async function handleRuntimeMessage(message) {
 
   if (message.type === "update-settings") {
     const settings = await updateSettings(message.settings || {});
+    await notifyContentQueueState();
 
     if (!settings.queuePaused) {
       processQueue().catch(console.error);
@@ -1220,6 +1233,68 @@ async function waitForTabComplete(tabId, timeoutMs) {
   }), timeoutMs, "tab-load-timeout");
 }
 
+function tabMatchesVideo(tab, videoId) {
+  const tabUrl = (tab && (tab.pendingUrl || tab.url)) || "";
+  const parsedUrl = normalizeUrl(tabUrl);
+
+  return Boolean(
+    parsedUrl &&
+    isYouTubeHost(parsedUrl.hostname) &&
+    parsedUrl.searchParams.get("v") === videoId
+  );
+}
+
+async function waitForTabVideoUrl(tabId, videoId, timeoutMs) {
+  const initialTab = await extensionApi.tabs.get(tabId);
+
+  if (tabMatchesVideo(initialTab, videoId)) {
+    return;
+  }
+
+  await withTimeout(new Promise((resolve, reject) => {
+    function cleanup() {
+      clearInterval(pollId);
+      extensionApi.tabs.onUpdated.removeListener(onUpdated);
+      extensionApi.tabs.onRemoved.removeListener(onRemoved);
+    }
+
+    async function checkCurrentTab() {
+      try {
+        const currentTab = await extensionApi.tabs.get(tabId);
+        if (tabMatchesVideo(currentTab, videoId)) {
+          cleanup();
+          resolve();
+        }
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
+    }
+
+    function onUpdated(updatedTabId, _changeInfo, updatedTab) {
+      if (updatedTabId === tabId && tabMatchesVideo(updatedTab, videoId)) {
+        cleanup();
+        resolve();
+      }
+    }
+
+    function onRemoved(removedTabId) {
+      if (removedTabId === tabId) {
+        cleanup();
+        reject(new Error("worker-tab-closed"));
+      }
+    }
+
+    const pollId = setInterval(() => {
+      checkCurrentTab().catch(reject);
+    }, 250);
+
+    extensionApi.tabs.onUpdated.addListener(onUpdated);
+    extensionApi.tabs.onRemoved.addListener(onRemoved);
+    checkCurrentTab().catch(reject);
+  }), timeoutMs, "tab-video-url-timeout");
+}
+
 async function injectPlayerWorker(tabId) {
   await extensionApi.tabs.executeScript(tabId, {
     file: "src/player-worker.js",
@@ -1549,6 +1624,7 @@ async function runQueueItem(item) {
       muted: true
     });
 
+    await waitForTabVideoUrl(tab.id, item.videoId, 30000);
     await waitForTabComplete(tab.id, 45000);
     await injectPlayerWorker(tab.id);
 
