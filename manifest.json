@@ -3,6 +3,7 @@
   "name": "YouTube™ Watched Marker",
   "version": "0.1.25",
   "description": "Queues YouTube™ videos and briefly plays them in a worker window to simulate watched playback.",
+  "homepage_url": "https://github.com/selimsum/youtube-watched-marker",
   "permissions": [
     "contextMenus",
     "storage",

@@ -238,7 +238,7 @@ async function scanChannelTimeframe() {
     const videosUrl = tab && getChannelVideosUrl(tab.url);
 
     if (!tab || !tab.id || !videosUrl) {
-      setChannelStatus("Open a YouTube channel page or Videos tab first.");
+      setChannelStatus("Open a YouTube™ channel page or Videos tab first.");
       return;
     }
 
@@ -378,7 +378,7 @@ function formatDebugEvent(entry) {
 function getItemDetailText(item) {
   if (item.status === "failed" && item.error) {
     if (item.error.startsWith("hidden-autoplay-blocked")) {
-      return "Failed: hidden autoplay blocked by Firefox/YouTube";
+      return "Failed: hidden autoplay blocked by Firefox/YouTube™";
     }
 
     if (item.error.startsWith("foreground-assist-playback-blocked")) {

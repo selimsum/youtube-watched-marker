@@ -336,7 +336,7 @@ function getInitialDataFromScripts() {
     try {
       return JSON.parse(text.slice(jsonStart, jsonEnd + 1));
     } catch (_error) {
-      // Try the next script if YouTube changes this wrapper.
+      // Try the next script if YouTube™ changes this wrapper.
     }
   }
 
