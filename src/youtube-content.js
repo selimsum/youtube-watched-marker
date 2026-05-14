@@ -1355,8 +1355,6 @@ document.addEventListener("keydown", (event) => {
 document.addEventListener("scroll", () => {
   removeOverlayMenuItem();
 }, true);
-window.addEventListener("resize", () => {
-});
 
 const observer = new MutationObserver((mutations) => {
   for (const mutation of mutations) {

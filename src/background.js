@@ -588,16 +588,32 @@ async function useRetainedWorkerWindow(url) {
   }
 }
 
-async function updateQueueItem(itemId, patch) {
+async function updateQueueItem(itemId, patch, event = null) {
   const queue = await getQueue();
   const updatedAt = new Date().toISOString();
-  const nextQueue = queue.map((item) => (
-    item.id === itemId
-      ? { ...item, ...patch, updatedAt }
-      : item
-  ));
+  let updatedItem = null;
+  const nextQueue = queue.map((item) => {
+    if (item.id !== itemId) {
+      return item;
+    }
+
+    const debugEvents = Array.isArray(item.debugEvents) ? item.debugEvents : [];
+    const nextDebugEvents = event && event.event
+      ? [...debugEvents, { at: updatedAt, ...event }].slice(-MAX_DEBUG_EVENTS)
+      : debugEvents;
+
+    updatedItem = {
+      ...item,
+      ...patch,
+      debugEvents: nextDebugEvents,
+      updatedAt
+    };
+
+    return updatedItem;
+  });
+
   await setQueue(nextQueue);
-  return nextQueue.find((item) => item.id === itemId);
+  return updatedItem;
 }
 
 function buildWatchUrl(videoId) {
@@ -1072,7 +1088,7 @@ async function rememberWorkerWindowBounds(worker) {
     const requestedBounds = normalizeWorkerBounds(worker.requestedBounds || {});
 
     if (shouldIgnorePrimaryFallbackBounds(actualBounds, requestedBounds)) {
-      await updateQueueItemWithDebug(worker.itemId, {}, {
+      await updateQueueItem(worker.itemId, {}, {
         event: `window-bounds-ignored-primary-fallback-${formatBounds(actualBounds)}`,
         elapsedMs: null
       }).catch(() => {});
@@ -1083,7 +1099,7 @@ async function rememberWorkerWindowBounds(worker) {
     await extensionApi.storage.local.set({
       [WORKER_WINDOW_BOUNDS_KEY]: safeBounds
     });
-    await updateQueueItemWithDebug(worker.itemId, {}, {
+    await updateQueueItem(worker.itemId, {}, {
       event: `window-bounds-saved-${formatBounds(safeBounds)}`,
       elapsedMs: null
     }).catch(() => {});
@@ -1116,7 +1132,7 @@ async function saveCurrentWorkerWindowBounds() {
   });
 
   if (activeWorker && activeWorker.itemId) {
-    await updateQueueItemWithDebug(activeWorker.itemId, {}, {
+    await updateQueueItem(activeWorker.itemId, {}, {
       event: `window-bounds-saved-current-${formatBounds(safeBounds)}`,
       elapsedMs: null
     }).catch(() => {});
@@ -1275,13 +1291,13 @@ async function rememberOpenedWorkerWindowBounds(itemId, windowId, requestedBound
       height: workerWindow.height
     });
 
-    await updateQueueItemWithDebug(itemId, {}, {
+    await updateQueueItem(itemId, {}, {
       event: `window-bounds-opened-${formatBounds(openedBounds)}`,
       elapsedMs: null
     });
 
     if (requestedBounds && openedBounds.left !== requestedBounds.left) {
-      await updateQueueItemWithDebug(itemId, {}, {
+      await updateQueueItem(itemId, {}, {
         event: `window-bounds-clamped-requested-${formatBounds(requestedBounds)}-actual-${formatBounds(openedBounds)}`,
         elapsedMs: null
       });
@@ -1472,7 +1488,7 @@ function handleWorkerStatus(message) {
 
   activeWorker.lastStatus = message.status;
   const playbackMode = getStatusPlaybackMode(message.status);
-  updateQueueItemWithDebug(message.itemId, {
+  updateQueueItem(message.itemId, {
     workerStatus: message.status,
     ...(playbackMode ? { playbackMode } : {})
   }, {
@@ -1501,33 +1517,6 @@ function resolveActiveWorker(result) {
   }
 }
 
-async function updateQueueItemWithDebug(itemId, patch, event) {
-  const queue = await getQueue();
-  const updatedAt = new Date().toISOString();
-  let updatedItem = null;
-  const nextQueue = queue.map((item) => {
-    if (item.id !== itemId) {
-      return item;
-    }
-
-    const debugEvents = Array.isArray(item.debugEvents) ? item.debugEvents : [];
-    const nextDebugEvents = event && event.event
-      ? [...debugEvents, { at: updatedAt, ...event }].slice(-MAX_DEBUG_EVENTS)
-      : debugEvents;
-
-    updatedItem = {
-      ...item,
-      ...patch,
-      debugEvents: nextDebugEvents,
-      updatedAt
-    };
-
-    return updatedItem;
-  });
-
-  await setQueue(nextQueue);
-  return updatedItem;
-}
 
 function getPlaybackModeForStatus(status) {
   if (status === "hidden-playback-confirmed") {
@@ -1647,10 +1636,133 @@ async function releaseWorkerTab() {
   }
 }
 
+async function setupWorker(item, settings, previousTab) {
+  let tab = null;
+  let workerWindowId = null;
+  let requestedBounds = null;
+
+  if (settings.workerMode === "window") {
+    const targetUrl = item.targetWorkerUrl || buildWatchUrl(item.videoId);
+    let workerWindow = await useRetainedWorkerWindow(targetUrl);
+
+    if (workerWindow) {
+      tab = workerWindow.tab;
+      workerWindowId = workerWindow.windowId;
+      requestedBounds = workerWindow.requestedBounds;
+      await updateQueueItem(item.id, {}, {
+        event: `worker-window-reused-${formatBounds(requestedBounds)}`,
+        elapsedMs: null
+      }).catch(() => {});
+    } else if (!item.openedWorkerUrl) {
+      workerWindow = await createWorkerWindow(targetUrl);
+      tab = workerWindow.tab;
+      workerWindowId = workerWindow.windowId;
+      requestedBounds = workerWindow.requestedBounds;
+      await updateQueueItem(item.id, {}, {
+        event: `worker-window-created-${formatBounds(requestedBounds)}`,
+        elapsedMs: null
+      }).catch(() => {});
+      await extensionApi.storage.local.set({ [WAITING_FOR_DIRECT_OPEN_KEY]: false });
+    } else {
+      tab = await findOpenedWorkerTab(item.openedWorkerUrl);
+      if (tab) {
+        workerWindowId = tab.windowId;
+        if (!isWorkerWatchUrl(tab.url || tab.pendingUrl) || !urlsMatchIgnoringEncoding(tab.url || tab.pendingUrl, targetUrl)) {
+          tab = await extensionApi.tabs.update(tab.id, { url: targetUrl, active: true, muted: true });
+        }
+        const openedWindow = await extensionApi.windows.get(workerWindowId);
+        requestedBounds = normalizeWorkerBounds(openedWindow);
+        await updateQueueItem(item.id, {}, {
+          event: `content-window-open-attached-${formatBounds(requestedBounds)}`,
+          elapsedMs: null
+        }).catch(() => {});
+      } else {
+        workerWindow = await createWorkerWindow(targetUrl);
+        tab = workerWindow.tab;
+        workerWindowId = workerWindow.windowId;
+        requestedBounds = workerWindow.requestedBounds;
+        await updateQueueItem(item.id, {}, {
+          event: `direct-window-not-found-created-${formatBounds(requestedBounds)}`,
+          elapsedMs: null
+        }).catch(() => {});
+        await extensionApi.storage.local.set({ [WAITING_FOR_DIRECT_OPEN_KEY]: false });
+      }
+    }
+  } else {
+    tab = await extensionApi.tabs.create({
+      url: buildWatchUrl(item.videoId),
+      active: false
+    });
+    workerWindowId = tab.windowId;
+  }
+
+  if (!tab || !tab.id) {
+    throw new Error("worker-tab-not-found");
+  }
+
+  return {
+    tab,
+    workerWindowId,
+    requestedBounds,
+    previousTabId: previousTab && previousTab.id !== tab.id ? previousTab.id : null,
+    previousWindowId: previousTab && previousTab.windowId !== workerWindowId ? previousTab.windowId : null
+  };
+}
+
+async function finishQueueItem(item, result, settings) {
+  const completedItem = await updateQueueItem(item.id, {
+    status: result && result.ok ? "completed" : "failed",
+    completedAt: new Date().toISOString(),
+    playbackSeconds: result && result.playbackSeconds,
+    seekFromEndSeconds: settings.seekFromEndSeconds,
+    seekTime: result && result.seekTime,
+    duration: result && result.duration,
+    title: cleanTitle(result && result.title) || item.title,
+    playbackMode: getPlaybackModeFromResult(result),
+    debugSummary: getDebugSummary(result),
+    error: result && result.ok ? null : ((result && result.error) || "worker-failed")
+  });
+  await notifyQueueUpdated({ item: completedItem });
+}
+
+async function handleQueueItemError(item, error) {
+  const failedItem = await updateQueueItem(item.id, {
+    status: "failed",
+    completedAt: new Date().toISOString(),
+    playbackMode: activeWorker && activeWorker.playbackMode ? activeWorker.playbackMode : "unknown",
+    debugSummary: activeWorker && activeWorker.playbackMode === "hidden"
+      ? "Hidden playback worked before failure"
+      : "Worker window playback failed",
+    error: error && error.message ? error.message : String(error)
+  });
+  await notifyQueueUpdated({ item: failedItem });
+}
+
+async function cleanupWorker(worker, workerWindowId, tab) {
+  if (worker) {
+    const settings = await getSettings();
+    const shouldRetain = (
+      settings.workerMode === "window" &&
+      await hasPendingQueueItems() &&
+      await retainWorkerForNextItem(worker)
+    );
+
+    if (!shouldRetain) {
+      await closeWorkerQuietly(worker);
+    }
+  } else if (workerWindowId) {
+    await closeWorkerQuietly({ windowId: workerWindowId, tabId: tab && tab.id });
+  } else if (tab && tab.id) {
+    await closeTabQuietly(tab.id);
+  }
+
+  activeWorker = null;
+  await armDirectOpenForPendingWindowQueue();
+}
+
 async function runQueueItem(item) {
   let tab = null;
   let workerWindowId = null;
-  let workerWindow = null;
 
   try {
     const runningItem = await updateQueueItem(item.id, {
@@ -1663,101 +1775,21 @@ async function runQueueItem(item) {
     const previousTab = await getActiveTab();
     const settings = await getSettings();
 
-    if (settings.workerMode === "window") {
-      const targetUrl = item.targetWorkerUrl || buildWatchUrl(item.videoId);
-      workerWindow = await useRetainedWorkerWindow(targetUrl);
-
-      if (workerWindow) {
-        tab = workerWindow.tab;
-        workerWindowId = workerWindow.windowId;
-        await updateQueueItemWithDebug(item.id, {}, {
-          event: `worker-window-reused-${formatBounds(workerWindow.requestedBounds)}`,
-          elapsedMs: null
-        }).catch(() => {});
-      } else if (!item.openedWorkerUrl) {
-        workerWindow = await createWorkerWindow(targetUrl);
-        tab = workerWindow.tab;
-        workerWindowId = workerWindow.windowId;
-        await updateQueueItemWithDebug(item.id, {}, {
-          event: `worker-window-created-${formatBounds(workerWindow.requestedBounds)}`,
-          elapsedMs: null
-        }).catch(() => {});
-        await extensionApi.storage.local.set({
-          [WAITING_FOR_DIRECT_OPEN_KEY]: false
-        });
-      } else {
-        tab = await findOpenedWorkerTab(item.openedWorkerUrl);
-      }
-
-      if (tab) {
-        workerWindowId = tab.windowId;
-
-        if (
-          !isWorkerWatchUrl(tab.url || tab.pendingUrl) ||
-          !urlsMatchIgnoringEncoding(tab.url || tab.pendingUrl, targetUrl)
-        ) {
-          tab = await extensionApi.tabs.update(tab.id, {
-            url: targetUrl,
-            active: true,
-            muted: true
-          });
-        }
-
-        const openedWindow = await extensionApi.windows.get(workerWindowId);
-        workerWindow = {
-          windowId: workerWindowId,
-          tab,
-          requestedBounds: normalizeWorkerBounds({
-            left: openedWindow.left,
-            top: openedWindow.top,
-            width: openedWindow.width,
-            height: openedWindow.height
-          }),
-          openedByContentScript: true
-        };
-        await updateQueueItemWithDebug(item.id, {}, {
-          event: `content-window-open-attached-${formatBounds(workerWindow.requestedBounds)}`,
-          elapsedMs: null
-        }).catch(() => {});
-      } else {
-        workerWindow = await createWorkerWindow(targetUrl);
-        tab = workerWindow.tab;
-        workerWindowId = workerWindow.windowId;
-        await updateQueueItemWithDebug(item.id, {}, {
-          event: `direct-window-not-found-created-${formatBounds(workerWindow.requestedBounds)}`,
-          elapsedMs: null
-        }).catch(() => {});
-        await extensionApi.storage.local.set({
-          [WAITING_FOR_DIRECT_OPEN_KEY]: false
-        });
-      }
-    } else {
-      tab = await extensionApi.tabs.create({
-        url: buildWatchUrl(item.videoId),
-        active: false
-      });
-    }
-
-    if (!tab || !tab.id) {
-      throw new Error("worker-tab-not-found");
-    }
+    const workerSetup = await setupWorker(item, settings, previousTab);
+    tab = workerSetup.tab;
+    workerWindowId = workerSetup.workerWindowId;
 
     activeWorker = {
       itemId: item.id,
       tabId: tab.id,
       windowId: workerWindowId,
-      requestedBounds: settings.workerMode === "window"
-        ? workerWindow && workerWindow.requestedBounds
-        : null,
+      requestedBounds: workerSetup.requestedBounds,
       lastStatus: settings.workerMode === "window" ? "window-created" : "tab-created",
-      previousTabId: previousTab && previousTab.id !== tab.id ? previousTab.id : null,
-      previousWindowId: previousTab && previousTab.windowId !== workerWindowId ? previousTab.windowId : null
+      previousTabId: workerSetup.previousTabId,
+      previousWindowId: workerSetup.previousWindowId
     };
 
-    await extensionApi.tabs.update(tab.id, {
-      muted: true
-    });
-
+    await extensionApi.tabs.update(tab.id, { muted: true });
     await waitForTabVideoUrl(tab.id, item.videoId, 30000);
     await waitForTabComplete(tab.id, 45000);
     await injectPlayerWorker(tab.id);
@@ -1774,51 +1806,11 @@ async function runQueueItem(item) {
     }
 
     const result = await waitForWorkerResult(item.id, getWorkerItemTimeoutMs(settings));
-
-    const completedItem = await updateQueueItem(item.id, {
-      status: result && result.ok ? "completed" : "failed",
-      completedAt: new Date().toISOString(),
-      playbackSeconds: result && result.playbackSeconds,
-      seekFromEndSeconds: settings.seekFromEndSeconds,
-      seekTime: result && result.seekTime,
-      duration: result && result.duration,
-      title: cleanTitle(result && result.title) || item.title,
-      playbackMode: getPlaybackModeFromResult(result),
-      debugSummary: getDebugSummary(result),
-      error: result && result.ok ? null : ((result && result.error) || "worker-failed")
-    });
-    await notifyQueueUpdated({ item: completedItem });
+    await finishQueueItem(item, result, settings);
   } catch (error) {
-    const failedItem = await updateQueueItem(item.id, {
-      status: "failed",
-      completedAt: new Date().toISOString(),
-      playbackMode: activeWorker && activeWorker.playbackMode ? activeWorker.playbackMode : "unknown",
-      debugSummary: activeWorker && activeWorker.playbackMode === "hidden"
-        ? "Hidden playback worked before failure"
-        : "Worker window playback failed",
-      error: error && error.message ? error.message : String(error)
-    });
-    await notifyQueueUpdated({ item: failedItem });
+    await handleQueueItemError(item, error);
   } finally {
-    if (activeWorker) {
-      const settings = await getSettings();
-      const shouldRetainWorker = (
-        settings.workerMode === "window" &&
-        await hasPendingQueueItems() &&
-        await retainWorkerForNextItem(activeWorker)
-      );
-
-      if (!shouldRetainWorker) {
-        await closeWorkerQuietly(activeWorker);
-      }
-    } else if (workerWindowId) {
-      await closeWorkerQuietly({ windowId: workerWindowId, tabId: tab && tab.id });
-    } else if (tab && tab.id) {
-      await closeTabQuietly(tab.id);
-    }
-
-    activeWorker = null;
-    await armDirectOpenForPendingWindowQueue();
+    await cleanupWorker(activeWorker, workerWindowId, tab);
   }
 }
 
