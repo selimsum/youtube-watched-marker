@@ -20,9 +20,13 @@ const workerMode = document.getElementById("workerMode");
 const playbackSeconds = document.getElementById("playbackSeconds");
 const seekFromEndSeconds = document.getElementById("seekFromEndSeconds");
 const maxQueueSize = document.getElementById("maxQueueSize");
-const lowQualityEnabled = document.getElementById("lowQualityEnabled");
-const cardButtonsEnabled = document.getElementById("cardButtonsEnabled");
 const windowBounds = document.getElementById("windowBounds");
+const channelStartDate = document.getElementById("channelStartDate");
+const channelEndDate = document.getElementById("channelEndDate");
+const channelTodayButton = document.getElementById("channelTodayButton");
+const channelOldestButton = document.getElementById("channelOldestButton");
+const scanChannelButton = document.getElementById("scanChannelButton");
+const channelScanStatus = document.getElementById("channelScanStatus");
 const pauseButton = document.getElementById("pauseButton");
 const resetWindowButton = document.getElementById("resetWindowButton");
 const saveWindowButton = document.getElementById("saveWindowButton");
@@ -46,6 +50,245 @@ function formatDate(value) {
     dateStyle: "short",
     timeStyle: "short"
   });
+}
+
+function parseInputDate(value) {
+  const trimmed = String(value || "").trim();
+  let year;
+  let month;
+  let day;
+  let match = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+
+  if (match) {
+    year = Number(match[1]);
+    month = Number(match[2]);
+    day = Number(match[3]);
+  } else {
+    match = trimmed.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+
+    if (!match) {
+      return null;
+    }
+
+    day = Number(match[1]);
+    month = Number(match[2]);
+    year = Number(match[3]);
+  }
+
+  const date = new Date(year, month - 1, day);
+
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return date;
+}
+
+function isOldestDateShortcut(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "oldest" || normalized === "end";
+}
+
+function formatDateInput(date) {
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = String(date.getFullYear());
+
+  return `${day}.${month}.${year}`;
+}
+
+function getNormalizedInputRange() {
+  const startValue = String(channelStartDate.value || "").trim();
+  const startDate = startValue ? parseInputDate(startValue) : new Date();
+  const endIsOldest = isOldestDateShortcut(channelEndDate.value);
+  const endDate = endIsOldest ? new Date(0) : parseInputDate(channelEndDate.value);
+
+  if (!startDate || !endDate) {
+    return null;
+  }
+
+  const startDay = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+  const endDay = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+  const earlier = startDay.getTime() <= endDay.getTime() ? startDay : endDay;
+  const later = startDay.getTime() <= endDay.getTime() ? endDay : startDay;
+  const inclusiveEnd = new Date(
+    later.getFullYear(),
+    later.getMonth(),
+    later.getDate(),
+    23,
+    59,
+    59,
+    999
+  );
+
+  return {
+    startMs: earlier.getTime(),
+    endMs: inclusiveEnd.getTime(),
+    startIso: earlier.toISOString(),
+    endIso: inclusiveEnd.toISOString()
+  };
+}
+
+function setChannelStatus(text) {
+  channelScanStatus.textContent = text;
+}
+
+function isYouTubeHost(hostname) {
+  const host = String(hostname || "").toLowerCase();
+  return host === "youtube.com" || host.endsWith(".youtube.com");
+}
+
+function getChannelVideosUrl(rawUrl) {
+  let url;
+
+  try {
+    url = new URL(rawUrl);
+  } catch (_error) {
+    return null;
+  }
+
+  if (!isYouTubeHost(url.hostname)) {
+    return null;
+  }
+
+  const parts = url.pathname.split("/").filter(Boolean);
+  const first = parts[0] || "";
+  const validPrefix = (
+    first.startsWith("@") ||
+    ["channel", "c", "user"].includes(first.toLowerCase())
+  );
+
+  if (!validPrefix) {
+    return null;
+  }
+
+  const baseParts = first.startsWith("@")
+    ? [first]
+    : parts.slice(0, 2);
+
+  if (baseParts.length < 1 || (!first.startsWith("@") && baseParts.length < 2)) {
+    return null;
+  }
+
+  url.pathname = `/${baseParts.join("/")}/videos`;
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
+
+function delay(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function waitForTabComplete(tabId) {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const tab = await extensionApi.tabs.get(tabId);
+
+    if (tab.status === "complete") {
+      return;
+    }
+
+    await delay(250);
+  }
+}
+
+async function sendTabMessageWithRetry(tabId, message) {
+  let lastError = null;
+
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    try {
+      return await extensionApi.tabs.sendMessage(tabId, message);
+    } catch (error) {
+      lastError = error;
+      await delay(300);
+    }
+  }
+
+  throw lastError || new Error("content-script-not-ready");
+}
+
+async function getActiveYouTubeTab() {
+  const tabs = await extensionApi.tabs.query({
+    active: true,
+    currentWindow: true
+  });
+
+  return tabs[0] || null;
+}
+
+async function scanChannelTimeframe() {
+  const range = getNormalizedInputRange();
+
+  if (!range) {
+    setChannelStatus("Enter valid dates like 14.04.2026 or 2026-04-14. End may be oldest.");
+    return;
+  }
+
+  scanChannelButton.disabled = true;
+  setChannelStatus("Opening channel videos page...");
+
+  try {
+    const tab = await getActiveYouTubeTab();
+    const videosUrl = tab && getChannelVideosUrl(tab.url);
+
+    if (!tab || !tab.id || !videosUrl) {
+      setChannelStatus("Open a YouTube channel page or Videos tab first.");
+      return;
+    }
+
+    if (tab.url !== videosUrl) {
+      await extensionApi.tabs.update(tab.id, {
+        url: videosUrl,
+        active: true
+      });
+      await waitForTabComplete(tab.id);
+      await delay(700);
+    }
+
+    setChannelStatus("Scanning loaded channel videos...");
+    const scanResult = await sendTabMessageWithRetry(tab.id, {
+      type: "scan-channel-timeframe",
+      range
+    });
+
+    if (!scanResult || scanResult.ok === false) {
+      setChannelStatus(`Scan failed: ${(scanResult && scanResult.error) || "unknown-error"}`);
+      return;
+    }
+
+    setChannelStatus(`Scanned ${scanResult.scanned}, matched ${scanResult.matched}. Queueing...`);
+    const enqueueResult = await extensionApi.runtime.sendMessage({
+      type: "bulk-enqueue-video-urls",
+      videos: scanResult.videos || [],
+      source: "channel-timeframe",
+      channelUrl: videosUrl
+    });
+
+    if (!enqueueResult || enqueueResult.ok === false) {
+      setChannelStatus(`Queue failed: ${(enqueueResult && enqueueResult.error) || "unknown-error"}`);
+      return;
+    }
+
+    setChannelStatus([
+      `Scanned ${scanResult.scanned}`,
+      `matched ${scanResult.matched}`,
+      `queued ${enqueueResult.queued}`,
+      `duplicate ${enqueueResult.duplicate}`,
+      `skipped ${enqueueResult.skipped + (scanResult.skippedUnparseable || 0)}`,
+      `errors ${enqueueResult.errors}`
+    ].join(" / "));
+    await loadQueue();
+  } catch (error) {
+    setChannelStatus(`Scan failed: ${error && error.message ? error.message : String(error)}`);
+  } finally {
+    scanChannelButton.disabled = false;
+  }
 }
 
 function createQueueNode(item) {
@@ -216,8 +459,6 @@ function applySettings(settings) {
   playbackSeconds.value = settings.playbackSeconds || 5;
   seekFromEndSeconds.value = settings.seekFromEndSeconds || 30;
   maxQueueSize.value = settings.maxQueueSize || 20;
-  lowQualityEnabled.checked = settings.lowQualityEnabled !== false;
-  cardButtonsEnabled.checked = settings.cardButtonsEnabled !== false;
   pauseButton.textContent = settings.queuePaused ? "Resume queue" : "Pause queue";
   windowBounds.textContent = formatWindowBounds(settings.workerWindowBounds);
   renderQueue(currentQueue);
@@ -337,17 +578,6 @@ maxQueueSize.addEventListener("change", async () => {
   });
 });
 
-lowQualityEnabled.addEventListener("change", async () => {
-  await updateSettings({
-    lowQualityEnabled: lowQualityEnabled.checked
-  });
-});
-
-cardButtonsEnabled.addEventListener("change", async () => {
-  await updateSettings({
-    cardButtonsEnabled: cardButtonsEnabled.checked
-  });
-});
 
 pauseButton.addEventListener("click", async () => {
   await updateSettings({
@@ -397,6 +627,20 @@ clearFailedButton.addEventListener("click", () => {
 
 exportDebugButton.addEventListener("click", () => {
   exportDebugLog().catch(console.error);
+});
+
+channelTodayButton.addEventListener("click", () => {
+  channelStartDate.value = formatDateInput(new Date());
+  setChannelStatus("Start date set to today.");
+});
+
+channelOldestButton.addEventListener("click", () => {
+  channelEndDate.value = "oldest";
+  setChannelStatus("End date set to oldest reachable video.");
+});
+
+scanChannelButton.addEventListener("click", () => {
+  scanChannelTimeframe().catch(console.error);
 });
 
 extensionApi.runtime.onMessage.addListener((message) => {

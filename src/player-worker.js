@@ -206,64 +206,6 @@
     return (value || document.title || "").replace(/ - YouTube$/, "").replace(/\s+/g, " ").trim();
   }
 
-  async function setLowPlaybackQuality(itemId) {
-    const player = document.getElementById("movie_player") || getPlayerElement();
-
-    if (!player) {
-      await reportStatus(itemId, "quality-player-not-found");
-      return;
-    }
-
-    const requestedLevels = ["tiny", "small"];
-    let changed = false;
-    const beforeQuality = getCurrentPlaybackQuality(player);
-    if (beforeQuality) {
-      await reportStatus(itemId, `quality-before-${beforeQuality}`);
-    }
-
-    try {
-      if (typeof player.setPlaybackQualityRange === "function") {
-        player.setPlaybackQualityRange("tiny", "small");
-        changed = true;
-        await reportStatus(itemId, "quality-range-requested-tiny-small");
-      }
-
-      if (typeof player.setPlaybackQuality === "function") {
-        player.setPlaybackQuality("tiny");
-        changed = true;
-        await reportStatus(itemId, "quality-requested-tiny");
-      }
-
-      if (typeof player.setPlaybackQualityRange === "function") {
-        for (const level of requestedLevels) {
-          player.setPlaybackQualityRange(level, level);
-          await reportStatus(itemId, `quality-range-requested-${level}`);
-        }
-      }
-    } catch (_error) {
-      await reportStatus(itemId, "quality-request-failed");
-      return;
-    }
-
-    await reportStatus(itemId, changed ? "quality-low-requested" : "quality-api-unavailable");
-    await delay(500);
-
-    const afterQuality = getCurrentPlaybackQuality(player);
-    if (afterQuality) {
-      await reportStatus(itemId, `quality-after-${afterQuality}`);
-    }
-  }
-
-  function getCurrentPlaybackQuality(player) {
-    try {
-      if (player && typeof player.getPlaybackQuality === "function") {
-        return player.getPlaybackQuality();
-      }
-    } catch (_error) {}
-
-    return null;
-  }
-
   function isAdShowing() {
     const player = getPlayerElement();
     return Boolean(player && player.classList.contains("ad-showing"));
@@ -428,6 +370,18 @@
     }
   }
 
+  function stopAllVideos() {
+    for (const video of document.querySelectorAll("video")) {
+      try {
+        video.pause();
+        video.autoplay = false;
+        video.removeAttribute("autoplay");
+      } catch (_error) {
+        // Best effort cleanup before the worker tab closes.
+      }
+    }
+  }
+
   async function reportStatus(itemId, status) {
     if (!itemId) {
       return;
@@ -507,19 +461,12 @@
   async function runWatchSimulation(options) {
     const playbackSeconds = options.playbackSeconds || 10;
     const seekFromEndSeconds = options.seekFromEndSeconds || 60;
-    const lowQualityEnabled = options.lowQualityEnabled !== false;
     const itemId = options.itemId;
     await reportStatus(itemId, "waiting-for-video");
     let video = await waitForVideo(45000, itemId);
     await reportStatus(itemId, "waiting-for-duration");
     const duration = await waitForDuration(video, 30000);
     const seekTime = Math.max(0, duration - seekFromEndSeconds);
-
-    if (lowQualityEnabled) {
-      await setLowPlaybackQuality(itemId);
-    } else {
-      await reportStatus(itemId, "quality-change-disabled");
-    }
 
     await reportStatus(itemId, "seeking");
     await seekVideo(video, seekTime);
@@ -531,7 +478,6 @@
     return {
       ok: true,
       playbackSeconds,
-      lowQualityEnabled,
       playbackMode,
       title: getVideoTitle(),
       seekTime,
@@ -549,6 +495,16 @@
 
   extensionApi.runtime.onMessage.addListener((message) => {
     if (!message || message.type !== "start-watch-simulation") {
+      if (message && message.type === "stop-watch-simulation") {
+        stopAllVideos();
+        releaseFocusAssist().catch(() => {});
+        activeRun = false;
+        runStartedAt = 0;
+        return Promise.resolve({
+          ok: true
+        });
+      }
+
       return undefined;
     }
 

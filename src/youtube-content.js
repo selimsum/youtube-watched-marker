@@ -2,8 +2,6 @@
 
 const MENU_ITEM_CLASS = "youtube-watched-marker-menu-item";
 const MENU_ITEM_SELECTOR = `.${MENU_ITEM_CLASS}`;
-const CARD_BUTTON_CLASS = "youtube-watched-marker-card-button";
-const CARD_BUTTON_SELECTOR = `.${CARD_BUTTON_CLASS}`;
 const LIGHT_MENU_BACKGROUND = "rgb(255, 255, 255)";
 const DARK_MENU_BACKGROUND = "rgb(40, 40, 40)";
 const LIGHT_MENU_TEXT = "rgb(15, 15, 15)";
@@ -14,13 +12,16 @@ const WORKER_WINDOW_BOUNDS = {
   width: 1280,
   height: 720
 };
+const CHANNEL_SCAN_MAX_SCROLLS = 120;
+const CHANNEL_SCAN_STABLE_SCROLLS = 4;
+const CHANNEL_SCAN_RECENT_OLDER_COUNT = 8;
+const DAY_MS = 24 * 60 * 60 * 1000;
 let scanTimer = null;
 let lastMenuVideoUrl = null;
 let lastMenuVideoTitle = "";
 let pendingOpenedWorkerWindow = null;
 let pendingOpenedWorkerUrl = null;
 let canOpenWorkerWindow = true;
-let cardButtonsEnabled = true;
 let overlayMenuItem = null;
 
 function getExtensionApi() {
@@ -33,6 +34,51 @@ function getExtensionApi() {
 
 const extensionApi = getExtensionApi();
 
+const MONTHS = {
+  jan: 0,
+  january: 0,
+  ocak: 0,
+  feb: 1,
+  february: 1,
+  subat: 1,
+  mar: 2,
+  march: 2,
+  mart: 2,
+  apr: 3,
+  april: 3,
+  nisan: 3,
+  may: 4,
+  mayis: 4,
+  jun: 5,
+  june: 5,
+  haziran: 5,
+  jul: 6,
+  july: 6,
+  temmuz: 6,
+  aug: 7,
+  august: 7,
+  agustos: 7,
+  sep: 8,
+  sept: 8,
+  september: 8,
+  eylul: 8,
+  oct: 9,
+  october: 9,
+  ekim: 9,
+  nov: 10,
+  november: 10,
+  kasim: 10,
+  dec: 11,
+  december: 11,
+  aralik: 11
+};
+
+function delay(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 function updateDirectOpenState(state) {
   canOpenWorkerWindow = Boolean(
     state &&
@@ -43,15 +89,6 @@ function updateDirectOpenState(state) {
       state.waitingForDirectOpen
     )
   );
-
-  if (state && typeof state.cardButtonsEnabled === "boolean") {
-    cardButtonsEnabled = state.cardButtonsEnabled;
-    if (!cardButtonsEnabled) {
-      removeCardButtons();
-    } else {
-      scheduleMenuScan();
-    }
-  }
 }
 
 extensionApi.runtime.sendMessage({ type: "get-queue-state" })
@@ -62,7 +99,484 @@ extensionApi.runtime.onMessage.addListener((message) => {
   if (message && message.type === "queue-state") {
     updateDirectOpenState(message);
   }
+
+  if (message && message.type === "scan-channel-timeframe") {
+    return scanChannelTimeframe(message.range);
+  }
 });
+
+function isChannelVideosPage() {
+  const parts = window.location.pathname.split("/").filter(Boolean);
+  const first = parts[0] || "";
+
+  return Boolean(
+    parts[parts.length - 1] === "videos" &&
+    (
+      first.startsWith("@") ||
+      ["channel", "c", "user"].includes(first.toLowerCase())
+    )
+  );
+}
+
+async function scanChannelTimeframe(range) {
+  if (
+    !range ||
+    !Number.isFinite(range.startMs) ||
+    !Number.isFinite(range.endMs)
+  ) {
+    return {
+      ok: false,
+      error: "invalid-date-range"
+    };
+  }
+
+  if (!isChannelVideosPage()) {
+    return {
+      ok: false,
+      error: "not-channel-videos-page"
+    };
+  }
+
+  const pageDataDates = getPageDataPublishDateMap();
+  const videosById = new Map();
+  const unparseableVideoIds = new Set();
+  let stableScrolls = 0;
+  let previousCount = 0;
+
+  for (let scrollCount = 0; scrollCount < CHANNEL_SCAN_MAX_SCROLLS; scrollCount += 1) {
+    collectChannelVideos(videosById, unparseableVideoIds, pageDataDates);
+
+    const seenCount = videosById.size + unparseableVideoIds.size;
+
+    if (seenCount === previousCount) {
+      stableScrolls += 1;
+    } else {
+      stableScrolls = 0;
+      previousCount = seenCount;
+    }
+
+    if (shouldStopChannelScan(videosById, range.startMs) || stableScrolls >= CHANNEL_SCAN_STABLE_SCROLLS) {
+      break;
+    }
+
+    window.scrollTo({
+      top: document.documentElement.scrollHeight,
+      behavior: "auto"
+    });
+    await delay(900);
+  }
+
+  collectChannelVideos(videosById, unparseableVideoIds, pageDataDates);
+
+  const videos = Array.from(videosById.values());
+  const matchedVideos = videos
+    .filter((video) => video.publishedMs >= range.startMs && video.publishedMs <= range.endMs)
+    .map((video) => ({
+      url: video.url,
+      title: video.title,
+      channelUrl: window.location.href,
+      publishedAt: new Date(video.publishedMs).toISOString(),
+      dateMatchPrecision: video.dateMatchPrecision
+    }));
+
+  return {
+    ok: true,
+    scanned: videosById.size + unparseableVideoIds.size,
+    matched: matchedVideos.length,
+    skippedUnparseable: unparseableVideoIds.size,
+    videos: matchedVideos
+  };
+}
+
+function collectChannelVideos(videosById, unparseableVideoIds, pageDataDates) {
+  for (const container of getVideoContainers(document.documentElement)) {
+    const url = findVideoUrlInContainer(container);
+    const videoId = getVideoIdFromUrl(url);
+
+    if (!videoId || videosById.has(videoId) || unparseableVideoIds.has(videoId)) {
+      continue;
+    }
+
+    const dateInfo = getPublishDateInfo(container, videoId, pageDataDates);
+
+    if (!dateInfo) {
+      unparseableVideoIds.add(videoId);
+      continue;
+    }
+
+    videosById.set(videoId, {
+      videoId,
+      url,
+      title: findVideoTitleInContainer(container),
+      publishedMs: dateInfo.publishedMs,
+      dateMatchPrecision: dateInfo.precision
+    });
+  }
+}
+
+function shouldStopChannelScan(videosById, startMs) {
+  const datedVideos = Array.from(videosById.values())
+    .filter((video) => Number.isFinite(video.publishedMs));
+
+  if (datedVideos.length < CHANNEL_SCAN_RECENT_OLDER_COUNT * 2) {
+    return false;
+  }
+
+  return datedVideos
+    .slice(-CHANNEL_SCAN_RECENT_OLDER_COUNT)
+    .every((video) => video.publishedMs < startMs);
+}
+
+function getPublishDateInfo(container, videoId, pageDataDates) {
+  const dataText = pageDataDates.get(videoId);
+  const dataInfo = parsePublishDateText(dataText);
+
+  if (dataInfo) {
+    return dataInfo;
+  }
+
+  for (const text of getPublishTextCandidates(container)) {
+    const info = parsePublishDateText(text);
+
+    if (info) {
+      return info;
+    }
+  }
+
+  return null;
+}
+
+function getPublishTextCandidates(container) {
+  if (!container) {
+    return [];
+  }
+
+  const candidates = [];
+  const selectors = [
+    "#metadata-line span",
+    "span.inline-metadata-item",
+    "span.yt-core-attributed-string",
+    "yt-formatted-string",
+    "[aria-label]",
+    "[title]"
+  ];
+
+  for (const selector of selectors) {
+    for (const element of container.querySelectorAll(selector)) {
+      const text = [
+        element.getAttribute("aria-label"),
+        element.getAttribute("title"),
+        element.textContent
+      ].filter(Boolean).join(" ");
+
+      if (looksLikePublishDateText(text)) {
+        candidates.push(text);
+      }
+    }
+  }
+
+  if (looksLikePublishDateText(container.textContent)) {
+    candidates.push(container.textContent);
+  }
+
+  return candidates;
+}
+
+function getPageDataPublishDateMap() {
+  const map = new Map();
+
+  for (const pageData of getPageInitialDataValues()) {
+    collectPublishDatesFromValue(pageData, map, new WeakSet());
+  }
+
+  return map;
+}
+
+function getPageInitialDataValues() {
+  const values = [];
+
+  if (window.ytInitialData) {
+    values.push(window.ytInitialData);
+  }
+
+  try {
+    if (window.wrappedJSObject && window.wrappedJSObject.ytInitialData) {
+      values.push(window.wrappedJSObject.ytInitialData);
+    }
+  } catch (_error) {
+    // Firefox may block direct access depending on the page object shape.
+  }
+
+  const scriptData = getInitialDataFromScripts();
+
+  if (scriptData) {
+    values.push(scriptData);
+  }
+
+  return values;
+}
+
+function getInitialDataFromScripts() {
+  for (const script of document.scripts) {
+    const text = script.textContent || "";
+    const marker = "var ytInitialData =";
+    const markerIndex = text.indexOf(marker);
+
+    if (markerIndex < 0) {
+      continue;
+    }
+
+    const jsonStart = text.indexOf("{", markerIndex + marker.length);
+    const jsonEnd = findJsonObjectEnd(text, jsonStart);
+
+    if (jsonStart < 0 || jsonEnd < 0) {
+      continue;
+    }
+
+    try {
+      return JSON.parse(text.slice(jsonStart, jsonEnd + 1));
+    } catch (_error) {
+      // Try the next script if YouTube changes this wrapper.
+    }
+  }
+
+  return null;
+}
+
+function findJsonObjectEnd(text, startIndex) {
+  if (startIndex < 0) {
+    return -1;
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = startIndex; index < text.length; index += 1) {
+    const character = text[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (character === "\"") {
+      inString = true;
+    } else if (character === "{") {
+      depth += 1;
+    } else if (character === "}") {
+      depth -= 1;
+
+      if (depth === 0) {
+        return index;
+      }
+    }
+  }
+
+  return -1;
+}
+
+function collectPublishDatesFromValue(value, map, visited) {
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  if (visited.has(value)) {
+    return;
+  }
+
+  visited.add(value);
+  const videoId = typeof value.videoId === "string" ? value.videoId : null;
+
+  if (videoId && !map.has(videoId)) {
+    const text = getRendererPublishText(value);
+
+    if (text) {
+      map.set(videoId, text);
+    }
+  }
+
+  for (const child of Object.values(value)) {
+    if (child && typeof child === "object") {
+      collectPublishDatesFromValue(child, map, visited);
+    }
+  }
+}
+
+function getRendererPublishText(value) {
+  const textObjects = [
+    value.publishedTimeText,
+    value.upcomingEventData && value.upcomingEventData.startTime,
+    value.dateText
+  ];
+
+  for (const textObject of textObjects) {
+    const text = extractTextValue(textObject);
+
+    if (text) {
+      return text;
+    }
+  }
+
+  return "";
+}
+
+function extractTextValue(value) {
+  if (!value) {
+    return "";
+  }
+
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (typeof value.simpleText === "string") {
+    return value.simpleText;
+  }
+
+  if (Array.isArray(value.runs)) {
+    return value.runs.map((run) => run.text || "").join("");
+  }
+
+  return "";
+}
+
+function looksLikePublishDateText(text) {
+  const normalized = normalizeDateText(text);
+
+  return Boolean(
+    normalized &&
+    (
+      /\bago\b/.test(normalized) ||
+      /\bonce\b/.test(normalized) ||
+      /\d{1,2}[./-]\d{1,2}[./-]\d{2,4}/.test(normalized) ||
+      /\b\d{4}-\d{1,2}-\d{1,2}\b/.test(normalized) ||
+      Object.keys(MONTHS).some((monthName) => normalized.includes(monthName))
+    )
+  );
+}
+
+function parsePublishDateText(text) {
+  const normalized = normalizeDateText(text);
+
+  if (!normalized) {
+    return null;
+  }
+
+  return parseExactDateText(normalized) || parseRelativeDateText(normalized);
+}
+
+function normalizeDateText(text) {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/\u00a0/g, " ")
+    .replace(/\u015f/g, "s")
+    .replace(/\u0131/g, "i")
+    .replace(/\u011f/g, "g")
+    .replace(/\u00fc/g, "u")
+    .replace(/\u00f6/g, "o")
+    .replace(/\u00e7/g, "c")
+    .replace(/[,\u2022]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseExactDateText(text) {
+  let match = text.match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/);
+
+  if (match) {
+    return makeExactDate(Number(match[1]), Number(match[2]), Number(match[3]));
+  }
+
+  match = text.match(/\b(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})\b/);
+
+  if (match) {
+    const year = Number(match[3].length === 2 ? `20${match[3]}` : match[3]);
+    return makeExactDate(year, Number(match[2]), Number(match[1]));
+  }
+
+  match = text.match(/\b([a-z]+)\s+(\d{1,2})\s+(\d{4})\b/);
+
+  if (match && Object.prototype.hasOwnProperty.call(MONTHS, match[1])) {
+    return makeExactDate(Number(match[3]), MONTHS[match[1]] + 1, Number(match[2]));
+  }
+
+  match = text.match(/\b(\d{1,2})\s+([a-z]+)\s+(\d{4})\b/);
+
+  if (match && Object.prototype.hasOwnProperty.call(MONTHS, match[2])) {
+    return makeExactDate(Number(match[3]), MONTHS[match[2]] + 1, Number(match[1]));
+  }
+
+  return null;
+}
+
+function makeExactDate(year, month, day) {
+  const date = new Date(year, month - 1, day);
+
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return {
+    publishedMs: date.getTime(),
+    precision: "exact"
+  };
+}
+
+function parseRelativeDateText(text) {
+  const match = text.match(/\b(\d+)\s*(second|seconds|minute|minutes|hour|hours|day|days|week|weeks|month|months|year|years|saniye|saat|gun|hafta|ay|yil)\b/);
+
+  if (!match || (!text.includes("ago") && !text.includes("once"))) {
+    return null;
+  }
+
+  const amount = Number(match[1]);
+  const unit = match[2];
+  const multiplier = getRelativeUnitDays(unit);
+
+  if (!Number.isFinite(amount) || !multiplier) {
+    return null;
+  }
+
+  return {
+    publishedMs: Date.now() - (amount * multiplier * DAY_MS),
+    precision: "approximate"
+  };
+}
+
+function getRelativeUnitDays(unit) {
+  if (["second", "seconds", "minute", "minutes", "hour", "hours", "saniye", "saat"].includes(unit)) {
+    return 0.5;
+  }
+
+  if (["day", "days", "gun"].includes(unit)) {
+    return 1;
+  }
+
+  if (["week", "weeks", "hafta"].includes(unit)) {
+    return 7;
+  }
+
+  if (["month", "months", "ay"].includes(unit)) {
+    return 30;
+  }
+
+  if (["year", "years", "yil"].includes(unit)) {
+    return 365;
+  }
+
+  return null;
+}
 
 function absoluteUrl(value) {
   if (!value) {
@@ -498,163 +1012,6 @@ function createMenuItem() {
   return item;
 }
 
-function createCardButton(container) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = CARD_BUTTON_CLASS;
-  button.title = "Mark as watched";
-  button.setAttribute("aria-label", "Mark as watched");
-  button.textContent = "+";
-
-  button.addEventListener("pointerdown", (event) => {
-    event.stopPropagation();
-    event.stopImmediatePropagation();
-
-    if (!canOpenWorkerWindow || button.dataset.busy === "true") {
-      return;
-    }
-
-    const url = findVideoUrlInContainer(container);
-    const workerUrl = buildWorkerUrl(url);
-
-    if (!workerUrl || pendingOpenedWorkerWindow) {
-      return;
-    }
-
-    pendingOpenedWorkerUrl = workerUrl;
-    pendingOpenedWorkerWindow = openWorkerWindow(workerUrl);
-
-    if (pendingOpenedWorkerWindow) {
-      canOpenWorkerWindow = false;
-    }
-  });
-
-  button.addEventListener("click", async (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation();
-
-    if (button.dataset.busy === "true") {
-      return;
-    }
-
-    const url = findVideoUrlInContainer(container);
-    const title = findVideoTitleInContainer(container);
-
-    if (!url) {
-      return;
-    }
-
-    button.dataset.busy = "true";
-    button.textContent = "...";
-
-    try {
-      await enqueueDirectOpen(url, title);
-      button.textContent = "✓";
-      button.dataset.busy = "false";
-      button.dataset.queued = "true";
-      button.setAttribute("aria-label", "Added to watch queue");
-      button.title = "Added to watch queue";
-    } catch (_error) {
-      button.textContent = "!";
-      setTimeout(() => {
-        button.textContent = "+";
-        button.dataset.busy = "false";
-      }, 1600);
-    }
-  });
-
-  return button;
-}
-
-function styleCardButton(button) {
-  button.style.display = "inline-flex";
-  button.style.alignItems = "center";
-  button.style.justifyContent = "center";
-  button.style.width = "32px";
-  button.style.height = "32px";
-  button.style.minWidth = "32px";
-  button.style.flex = "0 0 32px";
-  button.style.alignSelf = "flex-start";
-  button.style.marginInlineStart = "0";
-  button.style.marginInlineEnd = "0";
-  button.style.marginTop = "2px";
-  button.style.border = "0";
-  button.style.borderRadius = "50%";
-  button.style.background = "transparent";
-  button.style.color = "var(--yt-spec-text-primary, #0f0f0f)";
-  button.style.font = "700 22px/1 Roboto, Arial, sans-serif";
-  button.style.cursor = "pointer";
-}
-
-function findCardMenu(container) {
-  return container.querySelector([
-    "ytd-menu-renderer",
-    "ytd-menu-button-renderer",
-    "yt-icon-button",
-    "yt-button-shape button[aria-label]",
-    "button[aria-label*='Action menu']",
-    "button[aria-label*='More actions']",
-    "button[aria-label*='Diğer']",
-    "button[aria-label*='Eylem']",
-    "#menu",
-    "#menu-button"
-  ].join(","));
-}
-
-function attachButtonToMenu(button, menu) {
-  if (!menu || !menu.parentElement) {
-    return false;
-  }
-
-  styleCardButton(button);
-  menu.parentElement.style.display = "flex";
-  menu.parentElement.style.flexDirection = "column";
-  menu.parentElement.style.alignItems = "center";
-  menu.parentElement.append(button);
-  return true;
-}
-
-function injectCardButton(container) {
-  if (!cardButtonsEnabled) {
-    removeCardButtons();
-    return;
-  }
-
-  const existingButton = container.querySelector(CARD_BUTTON_SELECTOR);
-  if (existingButton) {
-    attachButtonToMenu(existingButton, findCardMenu(container));
-    return;
-  }
-
-  if (!findVideoUrlInContainer(container)) {
-    return;
-  }
-
-  const menu = findCardMenu(container);
-
-  if (menu) {
-    const button = createCardButton(container);
-    attachButtonToMenu(button, menu);
-  }
-}
-function scanVideoCards(root) {
-  if (!cardButtonsEnabled) {
-    removeCardButtons();
-    return;
-  }
-
-  for (const container of getVideoContainers(root)) {
-    injectCardButton(container);
-  }
-}
-
-function removeCardButtons() {
-  for (const button of document.querySelectorAll(CARD_BUTTON_SELECTOR)) {
-    button.remove();
-  }
-}
-
 function setMenuItemHover(item, active) {
   const colors = getMenuColors();
   item.style.background = active
@@ -978,7 +1335,6 @@ function scheduleMenuScan() {
   clearTimeout(scanTimer);
   scanTimer = setTimeout(() => {
     scanMenus(document.documentElement);
-    scanVideoCards(document.documentElement);
   }, 50);
 }
 
@@ -998,17 +1354,14 @@ document.addEventListener("keydown", (event) => {
 }, true);
 document.addEventListener("scroll", () => {
   removeOverlayMenuItem();
-  scanVideoCards(document.documentElement);
 }, true);
 window.addEventListener("resize", () => {
-  scanVideoCards(document.documentElement);
 });
 
 const observer = new MutationObserver((mutations) => {
   for (const mutation of mutations) {
     for (const node of mutation.addedNodes) {
       scanMenus(node);
-      scanVideoCards(node);
     }
   }
 
@@ -1023,4 +1376,3 @@ observer.observe(document.documentElement, {
 });
 
 scanMenus(document.documentElement);
-scanVideoCards(document.documentElement);

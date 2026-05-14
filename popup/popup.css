@@ -93,6 +93,63 @@ button:disabled {
   text-align: center;
 }
 
+.queue-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 0 0;
+}
+
+.queue-actions button {
+  min-width: 0;
+  padding: 0 6px;
+  font-size: 12px;
+}
+
+.channel-timeframe {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 0 0;
+}
+
+.channel-timeframe h2 {
+  margin: 0;
+  color: #172033;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.date-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.date-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px;
+  min-width: 0;
+}
+
+.date-input-row button {
+  width: auto;
+  min-width: 46px;
+  padding: 0 6px;
+  font-size: 12px;
+}
+
+.channel-timeframe button {
+  width: 100%;
+}
+
+.channel-timeframe .settings-note {
+  white-space: normal;
+}
+
 .settings {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -114,6 +171,36 @@ button:disabled {
   color: #566070;
 }
 
+.label-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  border: 1px solid #aeb4bf;
+  border-radius: 50%;
+  color: #566070;
+  background: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: default;
+  user-select: none;
+}
+
+.info-icon:focus-visible {
+  outline: 2px solid #7c3aed;
+  outline-offset: 2px;
+}
+
 .worker-field,
 .settings-warning {
   grid-column: 1 / -1;
@@ -130,7 +217,8 @@ button:disabled {
 }
 
 select,
-input[type="number"] {
+input[type="number"],
+input[type="text"] {
   min-height: 32px;
   width: 100%;
   min-width: 0;

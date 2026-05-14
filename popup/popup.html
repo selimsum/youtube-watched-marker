@@ -24,50 +24,82 @@
         No queued videos yet.
       </section>
 
+      <section class="queue-actions" aria-label="Queue actions">
+        <button id="pauseButton" type="button" title="Pause or resume automatic processing. New videos can still be added while paused.">Pause queue</button>
+        <button id="stopButton" type="button" title="Close the currently running worker and mark that queue item as stopped.">Stop</button>
+        <button id="retryFailedButton" type="button" title="Move failed items back to pending, up to the active queue limit.">Retry failed</button>
+        <button id="clearCompletedButton" type="button" title="Remove completed items from the queue history.">Clear done</button>
+        <button id="clearFailedButton" type="button" title="Remove failed items from the queue history.">Clear failed</button>
+      </section>
+
+      <section class="channel-timeframe" aria-label="Channel timeframe marking">
+        <h2>Channel timeframe</h2>
+        <div class="date-fields">
+          <label class="field">
+            <span class="label-row">
+              <span>Start</span>
+              <span class="info-icon" tabindex="0" role="img" aria-label="Start date help" title="Start date. Accepts DD.MM.YYYY or YYYY-MM-DD. Empty means today.">i</span>
+            </span>
+            <div class="date-input-row">
+              <input id="channelStartDate" type="text" inputmode="numeric" placeholder="14.04.2026">
+              <button id="channelTodayButton" type="button" title="Set the start date to today.">Today</button>
+            </div>
+          </label>
+          <label class="field">
+            <span class="label-row">
+              <span>End</span>
+              <span class="info-icon" tabindex="0" role="img" aria-label="End date help" title="End date. Accepts DD.MM.YYYY, YYYY-MM-DD, oldest, or end.">i</span>
+            </span>
+            <div class="date-input-row">
+              <input id="channelEndDate" type="text" inputmode="numeric" placeholder="1.1.2025">
+              <button id="channelOldestButton" type="button" title="Scan through the oldest reachable video on the channel.">End</button>
+            </div>
+          </label>
+        </div>
+        <button id="scanChannelButton" type="button" title="Scan the active YouTube channel Videos page and queue matching videos.">Scan channel</button>
+        <p id="channelScanStatus" class="settings-note">Open a YouTube channel, then scan a date range.</p>
+      </section>
+
       <section id="settingsPanel" class="settings" aria-label="Worker settings" hidden>
-        <p class="settings-warning">
-          Marking opens YouTube briefly in a muted worker browser window while signed in.
-        </p>
-        <label class="field worker-field" title="Choose where the temporary YouTube playback worker opens. Secondary window is recommended for desktop use.">
-          <span>Worker</span>
+        <label class="field worker-field">
+          <span class="label-row">
+            <span>Worker</span>
+            <span class="info-icon" tabindex="0" role="img" aria-label="Worker setting help" title="Choose where the temporary YouTube playback worker opens. Secondary window is recommended for desktop use.">i</span>
+          </span>
           <select id="workerMode" aria-describedby="workerModeHelp">
             <option value="window">Secondary window</option>
             <option value="tab">Browser tab</option>
           </select>
           <span id="workerModeHelp" class="sr-only">Choose where the temporary YouTube playback worker opens. Secondary window is recommended for desktop use.</span>
         </label>
-        <label class="field compact-field" title="How many seconds the video should keep playing after playback starts.">
-          <span>Play</span>
+        <label class="field compact-field">
+          <span class="label-row">
+            <span>Play</span>
+            <span class="info-icon" tabindex="0" role="img" aria-label="Play setting help" title="How many seconds the video should keep playing after playback starts.">i</span>
+          </span>
           <input id="playbackSeconds" type="number" min="1" max="30" step="1" aria-describedby="playbackSecondsHelp">
           <span id="playbackSecondsHelp" class="sr-only">How many seconds the video should keep playing after playback starts.</span>
         </label>
-        <label class="field compact-field" title="How far from the end of the video the worker should seek before playing.">
-          <span>Seek</span>
-          <input id="seekFromEndSeconds" type="number" min="5" max="120" step="5" aria-describedby="seekFromEndSecondsHelp">
+        <label class="field compact-field">
+          <span class="label-row">
+            <span>Seek</span>
+            <span class="info-icon" tabindex="0" role="img" aria-label="Seek setting help" title="How far from the end of the video the worker should seek before playing. Videos shorter than this start at 0:00.">i</span>
+          </span>
+          <input id="seekFromEndSeconds" type="number" min="1" max="120" step="1" aria-describedby="seekFromEndSecondsHelp">
           <span id="seekFromEndSecondsHelp" class="sr-only">How far from the end of the video the worker should seek before playing.</span>
         </label>
-        <label class="field compact-field" title="Maximum number of pending or running items allowed at once. Completed and failed history does not count.">
-          <span>Max</span>
-          <input id="maxQueueSize" type="number" min="1" max="100" step="1" aria-describedby="maxQueueSizeHelp">
+        <label class="field compact-field">
+          <span class="label-row">
+            <span>Max</span>
+            <span class="info-icon" tabindex="0" role="img" aria-label="Max setting help" title="Maximum number of pending or running items allowed at once. Completed and failed history does not count.">i</span>
+          </span>
+          <input id="maxQueueSize" type="number" min="1" max="500" step="1" aria-describedby="maxQueueSizeHelp">
           <span id="maxQueueSizeHelp" class="sr-only">Maximum number of pending or running items allowed at once. Completed and failed history does not count.</span>
-        </label>
-        <label class="check-field" title="Ask YouTube for a low playback quality to reduce bandwidth and CPU use. YouTube may ignore this.">
-          <input id="lowQualityEnabled" type="checkbox">
-          <span>Low quality</span>
-        </label>
-        <label class="check-field" title="Show small plus buttons directly on YouTube video cards. The three-dot menu and Firefox link context menu still work when this is off.">
-          <input id="cardButtonsEnabled" type="checkbox">
-          <span>Card plus buttons</span>
         </label>
         <p id="windowBounds" class="settings-note"></p>
         <div class="settings-actions">
-          <button id="pauseButton" type="button" title="Pause or resume automatic processing. New videos can still be added while paused.">Pause queue</button>
           <button id="resetWindowButton" type="button" title="Forget the saved worker-window position and use the default secondary-monitor placement next time.">Reset window</button>
           <button id="saveWindowButton" type="button" title="Save the current worker window position and size. Open a worker, move it where you want, then click this before it closes.">Save window</button>
-          <button id="stopButton" type="button" title="Close the currently running worker and mark that queue item as stopped.">Stop</button>
-          <button id="retryFailedButton" type="button" title="Move failed items back to pending, up to the active queue limit.">Retry failed</button>
-          <button id="clearCompletedButton" type="button" title="Remove completed items from the queue history.">Clear done</button>
-          <button id="clearFailedButton" type="button" title="Remove failed items from the queue history.">Clear failed</button>
           <button id="exportDebugButton" type="button" title="Download local queue, settings, and worker timing events as a JSON file.">Export log</button>
         </div>
       </section>

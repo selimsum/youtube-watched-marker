@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
-  "name": "YouTube Watched Marker",
+  "name": "YouTube™ Watched Marker",
   "version": "0.1.25",
-  "description": "Queues YouTube videos and briefly plays them in a worker window to simulate watched playback.",
+  "description": "Queues YouTube™ videos and briefly plays them in a worker window to simulate watched playback.",
   "permissions": [
     "contextMenus",
     "storage",
@@ -30,7 +30,7 @@
     }
   ],
   "browser_action": {
-    "default_title": "YouTube Watched Marker",
+    "default_title": "YouTube™ Watched Marker",
     "default_popup": "popup/popup.html",
     "default_icon": {
       "48": "icons/icon-48.svg",
