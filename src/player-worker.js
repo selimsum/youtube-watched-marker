@@ -129,6 +129,10 @@
         return video;
       }
 
+      if (video && video.networkState === HTMLMediaElement.NETWORK_EMPTY) {
+        video.load();
+      }
+
       await delay(250);
     }
 

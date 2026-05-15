@@ -559,13 +559,6 @@ async function useRetainedWorkerWindow(url) {
   retainedWorker = null;
 
   try {
-    await extensionApi.tabs.update(worker.tabId, {
-      url: "about:blank",
-      active: true,
-      muted: true
-    });
-    await waitForTabComplete(worker.tabId, 15000);
-
     const tab = await extensionApi.tabs.update(worker.tabId, {
       url,
       active: true,
@@ -574,7 +567,7 @@ async function useRetainedWorkerWindow(url) {
     await extensionApi.windows.update(worker.windowId, {
       focused: true
     }).catch(() => {});
-    await delay(250);
+    await waitForTabVideoUrl(tab.id, getRequiredVideoIdFromUrl(url), 30000);
 
     return {
       windowId: worker.windowId,
@@ -1362,6 +1355,16 @@ function tabMatchesVideo(tab, videoId) {
     isYouTubeHost(parsedUrl.hostname) &&
     parsedUrl.searchParams.get("v") === videoId
   );
+}
+
+function getRequiredVideoIdFromUrl(url) {
+  const videoId = extractVideoIdFromUrl(url);
+
+  if (!videoId) {
+    throw new Error("worker-target-video-id-missing");
+  }
+
+  return videoId;
 }
 
 async function waitForTabVideoUrl(tabId, videoId, timeoutMs) {
