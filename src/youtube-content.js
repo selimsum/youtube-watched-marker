@@ -1374,3 +1374,12 @@ observer.observe(document.documentElement, {
 });
 
 scanMenus(document.documentElement);
+
+// Export functions for testing if running in Node.js
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    getRelativeUnitDays,
+    parsePublishDateText,
+    buildVideoDurationText
+  };
+}
