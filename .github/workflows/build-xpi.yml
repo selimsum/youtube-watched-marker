@@ -1,0 +1,57 @@
+name: Build XPI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Firefox extension
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run syntax checks
+        run: npm run check
+
+      - name: Run extension lint
+        run: npm run lint
+
+      - name: Build package
+        run: npm run build
+
+      - name: Create XPI artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip_file="$(find web-ext-artifacts -maxdepth 1 -name '*.zip' | head -n 1)"
+          if [[ -z "$zip_file" ]]; then
+            echo "No web-ext zip artifact found" >&2
+            exit 1
+          fi
+          xpi_file="${zip_file%.zip}.xpi"
+          cp "$zip_file" "$xpi_file"
+          echo "XPI_FILE=$xpi_file" >> "$GITHUB_ENV"
+
+      - name: Upload XPI
+        uses: actions/upload-artifact@v4
+        with:
+          name: youtube-watched-marker-xpi
+          path: ${{ env.XPI_FILE }}
+          if-no-files-found: error
