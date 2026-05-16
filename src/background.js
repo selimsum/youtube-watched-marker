@@ -63,9 +63,12 @@ function normalizeUrl(value) {
 }
 
 function isYouTubeHost(hostname) {
-  const host = hostname.toLowerCase();
+  const host = String(hostname || "").toLowerCase();
   return (
     host === "youtube.com" ||
+    host === "www.youtube.com" ||
+    host === "m.youtube.com" ||
+    host === "music.youtube.com" ||
     host.endsWith(".youtube.com") ||
     host === "youtu.be"
   );
@@ -1993,6 +1996,9 @@ resetStaleRunningItems()
 if (typeof module !== "undefined") {
   module.exports = {
     cleanVideoId,
-    extractVideoIdFromUrl
+    extractVideoIdFromUrl,
+    isYouTubeHost,
+    normalizeUrl,
+    urlsMatchIgnoringEncoding
   };
 }
