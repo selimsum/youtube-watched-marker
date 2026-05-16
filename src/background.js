@@ -63,9 +63,13 @@ function normalizeUrl(value) {
 }
 
 function isYouTubeHost(hostname) {
-  const host = hostname.toLowerCase();
+  const host = String(hostname || "").toLowerCase();
+
   return (
     host === "youtube.com" ||
+    host === "www.youtube.com" ||
+    host === "m.youtube.com" ||
+    host === "music.youtube.com" ||
     host.endsWith(".youtube.com") ||
     host === "youtu.be"
   );
@@ -1272,33 +1276,6 @@ async function forceWorkerWindowBoundsRepeatedly(windowId, bounds) {
   await delay(75);
 }
 
-async function rememberOpenedWorkerWindowBounds(itemId, windowId, requestedBounds) {
-  await delay(1800);
-
-  try {
-    const workerWindow = await extensionApi.windows.get(windowId);
-    const openedBounds = normalizeWorkerBounds({
-      left: workerWindow.left,
-      top: workerWindow.top,
-      width: workerWindow.width,
-      height: workerWindow.height
-    });
-
-    await updateQueueItem(itemId, {}, {
-      event: `window-bounds-opened-${formatBounds(openedBounds)}`,
-      elapsedMs: null
-    });
-
-    if (requestedBounds && openedBounds.left !== requestedBounds.left) {
-      await updateQueueItem(itemId, {}, {
-        event: `window-bounds-clamped-requested-${formatBounds(requestedBounds)}-actual-${formatBounds(openedBounds)}`,
-        elapsedMs: null
-      });
-    }
-  } catch (_error) {
-    // Diagnostic only.
-  }
-}
 
 async function forceWorkerWindowBounds(windowId, bounds) {
   await extensionApi.windows.update(windowId, {
@@ -1993,6 +1970,9 @@ resetStaleRunningItems()
 if (typeof module !== "undefined") {
   module.exports = {
     cleanVideoId,
-    extractVideoIdFromUrl
+    extractVideoIdFromUrl,
+    isYouTubeHost,
+    normalizeUrl,
+    urlsMatchIgnoringEncoding
   };
 }

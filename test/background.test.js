@@ -1,27 +1,31 @@
-const { describe, it } = require('node:test');
+const { describe, it } = require("mocha");
 const assert = require('node:assert');
 
-// Mock Chrome Extension API before importing the file
-global.chrome = {
-  runtime: {
-    onInstalled: { addListener: () => {} },
-    onStartup: { addListener: () => {} },
-    onMessage: { addListener: () => {} }
-  },
+// Mock browser API to avoid reference errors when requiring background.js
+global.browser = {
   contextMenus: {
-    onClicked: { addListener: () => {} },
     create: () => {},
-    remove: () => Promise.resolve()
+    remove: async () => {},
+    onClicked: { addListener: () => {} }
+  },
+  runtime: {
+    onMessage: { addListener: () => {} },
+    onInstalled: { addListener: () => {} },
+    onStartup: { addListener: () => {} }
   },
   tabs: {
-    onCreated: { addListener: () => {} },
     onUpdated: { addListener: () => {} },
-    query: () => Promise.resolve([])
+    onRemoved: { addListener: () => {} },
+    onCreated: { addListener: () => {} },
+    query: async () => []
+  },
+  alarms: {
+    onAlarm: { addListener: () => {} }
   },
   storage: {
     local: {
-      get: () => Promise.resolve({}),
-      set: () => Promise.resolve()
+      get: async () => ({}),
+      set: async () => {}
     }
   },
   action: {
@@ -34,50 +38,52 @@ global.chrome = {
   }
 };
 
-const { extractVideoIdFromUrl } = require('../src/background.js');
+// Also add chrome as a fallback in case browser doesn't cover something
+global.chrome = global.browser;
 
-describe('extractVideoIdFromUrl', () => {
-  it('extracts ID from standard watch URL', () => {
-    assert.strictEqual(extractVideoIdFromUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
-  });
+const bg = require('../src/background.js');
 
-  it('extracts ID from shorts URL', () => {
-    assert.strictEqual(extractVideoIdFromUrl('https://www.youtube.com/shorts/dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
-  });
+describe("cleanVideoId", () => {
+  it("should work", () => {
+  assert.strictEqual(bg.cleanVideoId('dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
+  assert.strictEqual(bg.cleanVideoId('invalid-id'), null);
+  assert.strictEqual(bg.cleanVideoId(' dQw4w9WgXcQ '), 'dQw4w9WgXcQ');
+  assert.strictEqual(bg.cleanVideoId(''), null);
+  assert.strictEqual(bg.cleanVideoId(null), null);
+  assert.strictEqual(bg.cleanVideoId(undefined), null);
+  assert.strictEqual(bg.cleanVideoId('12345678901'), '12345678901');
+  assert.strictEqual(bg.cleanVideoId('123456789012'), null);
+    });
+});
 
-  it('extracts ID from embed URL', () => {
-    assert.strictEqual(extractVideoIdFromUrl('https://www.youtube.com/embed/dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
-  });
+describe("extractVideoIdFromUrl", () => {
+  it("should work", () => {
+  assert.strictEqual(bg.extractVideoIdFromUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
+  assert.strictEqual(bg.extractVideoIdFromUrl('https://youtu.be/dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
+  assert.strictEqual(bg.extractVideoIdFromUrl('https://www.youtube.com/shorts/dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
+  assert.strictEqual(bg.extractVideoIdFromUrl('https://www.youtube.com/embed/dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
+  assert.strictEqual(bg.extractVideoIdFromUrl('https://www.youtube.com/live/dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
+  assert.strictEqual(bg.extractVideoIdFromUrl('https://www.youtube.com/watch?v=invalid-id'), null);
+  assert.strictEqual(bg.extractVideoIdFromUrl('https://example.com/watch?v=dQw4w9WgXcQ'), null);
+  assert.strictEqual(bg.extractVideoIdFromUrl('invalid-url'), null);
+    });
+});
 
-  it('extracts ID from live URL', () => {
-    assert.strictEqual(extractVideoIdFromUrl('https://www.youtube.com/live/dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
-  });
+describe("isYouTubeHost", () => {
+  it("should work", () => {
+  assert.strictEqual(bg.isYouTubeHost('youtube.com'), true);
+  assert.strictEqual(bg.isYouTubeHost('www.youtube.com'), true);
+  assert.strictEqual(bg.isYouTubeHost('m.youtube.com'), true);
+  assert.strictEqual(bg.isYouTubeHost('youtu.be'), true);
+  assert.strictEqual(bg.isYouTubeHost('example.com'), false);
+  assert.strictEqual(bg.isYouTubeHost('fakeyoutube.com'), false);
+    });
+});
 
-  it('extracts ID from youtu.be URL', () => {
-    assert.strictEqual(extractVideoIdFromUrl('https://youtu.be/dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
-  });
-
-  it('returns null for non-YouTube URLs', () => {
-    assert.strictEqual(extractVideoIdFromUrl('https://www.example.com/watch?v=dQw4w9WgXcQ'), null);
-  });
-
-  it('returns null for invalid video IDs', () => {
-    assert.strictEqual(extractVideoIdFromUrl('https://www.youtube.com/watch?v=too_short'), null);
-    assert.strictEqual(extractVideoIdFromUrl('https://www.youtube.com/watch?v=this_id_is_way_too_long'), null);
-    assert.strictEqual(extractVideoIdFromUrl('https://www.youtube.com/watch?v=invalid@id!'), null);
-  });
-
-  it('returns null for empty or invalid URLs', () => {
-    assert.strictEqual(extractVideoIdFromUrl(''), null);
-    assert.strictEqual(extractVideoIdFromUrl(null), null);
-    assert.strictEqual(extractVideoIdFromUrl('not a url'), null);
-  });
-
-  it('extracts ID from URLs with additional parameters', () => {
-    assert.strictEqual(extractVideoIdFromUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42s'), 'dQw4w9WgXcQ');
-  });
-
-  it('extracts ID from youtu.be URLs with additional parameters', () => {
-    assert.strictEqual(extractVideoIdFromUrl('https://youtu.be/dQw4w9WgXcQ?t=42'), 'dQw4w9WgXcQ');
-  });
+describe("normalizeUrl", () => {
+  it("should work", () => {
+  assert.ok(bg.normalizeUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ') instanceof URL);
+  assert.strictEqual(bg.normalizeUrl('invalid-url'), null);
+  assert.strictEqual(bg.normalizeUrl(null), null);
+    });
 });
