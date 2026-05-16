@@ -1,0 +1,16 @@
+{
+  "name": "youtube-watched-marker",
+  "version": "0.1.25",
+  "private": true,
+  "description": "Firefox-first WebExtension for queueing YouTube™ videos and simulating watched playback.",
+  "homepage": "https://github.com/selimsum/youtube-watched-marker",
+  "scripts": {
+    "check": "node --check src/background.js && node --check src/player-worker.js && node --check src/youtube-content.js && node --check popup/popup.js",
+    "test": "node --test test/*.test.js",
+    "lint": "web-ext lint --source-dir . --ignore-files package.json package-lock.json node_modules web-ext-artifacts test",
+    "build": "web-ext build --source-dir . --artifacts-dir web-ext-artifacts --overwrite-dest --ignore-files package.json package-lock.json node_modules web-ext-artifacts README.md test"
+  },
+  "devDependencies": {
+    "web-ext": "^8.9.0"
+  }
+}
