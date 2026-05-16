@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Window Position Test</title>
+    <style>
+      :root {
+        font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #172033;
+        background: #f7f7f5;
+      }
+
+      body {
+        max-width: 680px;
+        margin: 40px auto;
+        padding: 0 20px;
+      }
+
+      button {
+        min-height: 36px;
+        padding: 0 14px;
+        border: 1px solid #b8bab3;
+        border-radius: 6px;
+        background: #ffffff;
+        color: #172033;
+        font: inherit;
+        cursor: pointer;
+      }
+
+      button + button {
+        margin-left: 8px;
+      }
+
+      pre {
+        overflow: auto;
+        padding: 12px;
+        border: 1px solid #deded8;
+        border-radius: 6px;
+        background: #ffffff;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Window Position Test</h1>
+    <p>
+      Click <strong>Open window</strong>, move the small window to the target monitor, then click
+      <strong>Save position</strong> inside that window. It will close automatically. The next
+      <strong>Open window</strong> click uses the saved position.
+    </p>
+
+    <p>
+      <button id="openButton" type="button">Open window</button>
+      <button id="clearButton" type="button">Clear saved position</button>
+    </p>
+
+    <pre id="status"></pre>
+
+    <script>
+      "use strict";
+
+      const STORAGE_KEY = "window-position-test-bounds";
+      const DEFAULT_BOUNDS = {
+        left: 2176,
+        top: 144,
+        width: 520,
+        height: 320
+      };
+
+      const openButton = document.getElementById("openButton");
+      const clearButton = document.getElementById("clearButton");
+      const status = document.getElementById("status");
+
+      function getSavedBounds() {
+        try {
+          return JSON.parse(localStorage.getItem(STORAGE_KEY)) || DEFAULT_BOUNDS;
+        } catch (_error) {
+          return DEFAULT_BOUNDS;
+        }
+      }
+
+      function setSavedBounds(bounds) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(bounds));
+      }
+
+      function renderStatus(extra) {
+        status.textContent = JSON.stringify({
+          saved: getSavedBounds(),
+          screen: {
+            availLeft: window.screen.availLeft,
+            availTop: window.screen.availTop,
+            availWidth: window.screen.availWidth,
+            availHeight: window.screen.availHeight,
+            width: window.screen.width,
+            height: window.screen.height
+          },
+          parentWindow: {
+            screenX: window.screenX,
+            screenY: window.screenY,
+            outerWidth: window.outerWidth,
+            outerHeight: window.outerHeight
+          },
+          ...(extra || {})
+        }, null, 2);
+      }
+
+      function openPositionedWindow() {
+        const bounds = getSavedBounds();
+        const features = [
+          "popup=yes",
+          `left=${bounds.left}`,
+          `top=${bounds.top}`,
+          `width=${bounds.width}`,
+          `height=${bounds.height}`
+        ].join(",");
+        const child = window.open("", "window-position-test-child", features);
+
+        if (!child) {
+          renderStatus({ error: "Popup was blocked" });
+          return;
+        }
+
+        child.document.open();
+        child.document.write(getChildHtml());
+        child.document.close();
+        child.focus();
+
+        setTimeout(() => {
+          try {
+            child.moveTo(bounds.left, bounds.top);
+            child.resizeTo(bounds.width, bounds.height);
+          } catch (error) {
+            renderStatus({
+              requested: bounds,
+              moveError: error && error.message ? error.message : String(error)
+            });
+          }
+        }, 300);
+
+        setTimeout(() => {
+          try {
+            child.moveTo(bounds.left, bounds.top);
+            child.resizeTo(bounds.width, bounds.height);
+          } catch (_error) {}
+        }, 1000);
+
+        setTimeout(() => {
+          renderStatus({
+            requested: bounds,
+            opened: {
+              screenX: child.screenX,
+              screenY: child.screenY,
+              outerWidth: child.outerWidth,
+              outerHeight: child.outerHeight
+            }
+          });
+        }, 1500);
+      }
+
+      function getChildHtml() {
+        return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Positioned Test Window</title>
+    <style>
+      body {
+        margin: 24px;
+        font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      button {
+        min-height: 36px;
+        padding: 0 14px;
+      }
+      pre {
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Move me, then save</h1>
+    <p>Move this window to the target monitor, then click save. The window will close.</p>
+    <button id="saveButton" type="button">Save position</button>
+    <pre id="childStatus"></pre>
+    <script>
+      const childStatus = document.getElementById("childStatus");
+      function getBounds() {
+        return {
+          left: Math.round(window.screenX),
+          top: Math.round(window.screenY),
+          width: Math.round(window.outerWidth),
+          height: Math.round(window.outerHeight)
+        };
+      }
+      function render() {
+        childStatus.textContent = JSON.stringify(getBounds(), null, 2);
+      }
+      document.getElementById("saveButton").addEventListener("click", () => {
+        window.opener.postMessage({
+          type: "save-window-position-test-bounds",
+          bounds: getBounds()
+        }, "*");
+        window.close();
+      });
+      setInterval(render, 500);
+      render();
+    <\/script>
+  </body>
+</html>`;
+      }
+
+      window.addEventListener("message", (event) => {
+        if (!event.data || event.data.type !== "save-window-position-test-bounds") {
+          return;
+        }
+
+        setSavedBounds(event.data.bounds);
+        renderStatus({
+          savedFromChild: event.data.bounds
+        });
+      });
+
+      openButton.addEventListener("click", openPositionedWindow);
+      clearButton.addEventListener("click", () => {
+        localStorage.removeItem(STORAGE_KEY);
+        renderStatus({ cleared: true });
+      });
+
+      renderStatus();
+    </script>
+  </body>
+</html>
