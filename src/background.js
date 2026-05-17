@@ -1317,21 +1317,37 @@ async function forceWorkerWindowBounds(windowId, bounds) {
   });
 }
 
-async function waitForTabComplete(tabId, timeoutMs) {
+async function waitForTabCondition(tabId, conditionFn, timeoutMs, timeoutMessage, pollIntervalMs = null) {
   const initialTab = await extensionApi.tabs.get(tabId);
 
-  if (initialTab.status === "complete") {
+  if (conditionFn(initialTab)) {
     return;
   }
 
   await withTimeout(new Promise((resolve, reject) => {
+    let pollId = null;
+
     function cleanup() {
+      if (pollId !== null) clearInterval(pollId);
       extensionApi.tabs.onUpdated.removeListener(onUpdated);
       extensionApi.tabs.onRemoved.removeListener(onRemoved);
     }
 
-    function onUpdated(updatedTabId, changeInfo) {
-      if (updatedTabId === tabId && changeInfo.status === "complete") {
+    async function checkCurrentTab() {
+      try {
+        const currentTab = await extensionApi.tabs.get(tabId);
+        if (conditionFn(currentTab)) {
+          cleanup();
+          resolve();
+        }
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
+    }
+
+    function onUpdated(updatedTabId, changeInfo, updatedTab) {
+      if (updatedTabId === tabId && conditionFn(updatedTab, changeInfo)) {
         cleanup();
         resolve();
       }
@@ -1344,9 +1360,25 @@ async function waitForTabComplete(tabId, timeoutMs) {
       }
     }
 
+    if (pollIntervalMs !== null) {
+      pollId = setInterval(() => {
+        checkCurrentTab().catch(reject);
+      }, pollIntervalMs);
+    }
+
     extensionApi.tabs.onUpdated.addListener(onUpdated);
     extensionApi.tabs.onRemoved.addListener(onRemoved);
-  }), timeoutMs, "tab-load-timeout");
+    checkCurrentTab().catch(reject);
+  }), timeoutMs, timeoutMessage);
+}
+
+async function waitForTabComplete(tabId, timeoutMs) {
+  await waitForTabCondition(
+    tabId,
+    (tab, changeInfo) => tab.status === "complete" || (changeInfo && changeInfo.status === "complete"),
+    timeoutMs,
+    "tab-load-timeout"
+  );
 }
 
 function tabMatchesVideo(tab, videoId) {
@@ -1371,54 +1403,13 @@ function getRequiredVideoIdFromUrl(url) {
 }
 
 async function waitForTabVideoUrl(tabId, videoId, timeoutMs) {
-  const initialTab = await extensionApi.tabs.get(tabId);
-
-  if (tabMatchesVideo(initialTab, videoId)) {
-    return;
-  }
-
-  await withTimeout(new Promise((resolve, reject) => {
-    function cleanup() {
-      clearInterval(pollId);
-      extensionApi.tabs.onUpdated.removeListener(onUpdated);
-      extensionApi.tabs.onRemoved.removeListener(onRemoved);
-    }
-
-    async function checkCurrentTab() {
-      try {
-        const currentTab = await extensionApi.tabs.get(tabId);
-        if (tabMatchesVideo(currentTab, videoId)) {
-          cleanup();
-          resolve();
-        }
-      } catch (error) {
-        cleanup();
-        reject(error);
-      }
-    }
-
-    function onUpdated(updatedTabId, _changeInfo, updatedTab) {
-      if (updatedTabId === tabId && tabMatchesVideo(updatedTab, videoId)) {
-        cleanup();
-        resolve();
-      }
-    }
-
-    function onRemoved(removedTabId) {
-      if (removedTabId === tabId) {
-        cleanup();
-        reject(new Error("worker-tab-closed"));
-      }
-    }
-
-    const pollId = setInterval(() => {
-      checkCurrentTab().catch(reject);
-    }, 250);
-
-    extensionApi.tabs.onUpdated.addListener(onUpdated);
-    extensionApi.tabs.onRemoved.addListener(onRemoved);
-    checkCurrentTab().catch(reject);
-  }), timeoutMs, "tab-video-url-timeout");
+  await waitForTabCondition(
+    tabId,
+    (tab) => tabMatchesVideo(tab, videoId),
+    timeoutMs,
+    "tab-video-url-timeout",
+    250
+  );
 }
 
 async function injectPlayerWorker(tabId) {
