@@ -58,6 +58,19 @@ describe("youtube-content.js", () => {
       expect(window.hasReadableContrast("rgb(255, 255, 255)", "rgb(0, 0, 0)")).to.be.true;
       expect(window.hasReadableContrast("rgb(128, 128, 128)", "rgb(128, 128, 128)")).to.be.false;
     });
+
+    it("should mix RGB colors correctly based on amount", () => {
+      expect(window.mixRgbColors("rgb(0, 0, 0)", "rgb(255, 255, 255)", 0.5)).to.equal("rgb(128, 128, 128)");
+      expect(window.mixRgbColors("rgb(0, 0, 0)", "rgb(255, 255, 255)", 0)).to.equal("rgb(0, 0, 0)");
+      expect(window.mixRgbColors("rgb(0, 0, 0)", "rgb(255, 255, 255)", 1)).to.equal("rgb(255, 255, 255)");
+      expect(window.mixRgbColors("rgb(200, 100, 50)", "rgb(100, 50, 25)", 0.2)).to.equal("rgb(180, 90, 45)");
+    });
+
+    it("should return baseValue if either color is invalid", () => {
+      expect(window.mixRgbColors("invalid", "rgb(255, 255, 255)", 0.5)).to.equal("invalid");
+      expect(window.mixRgbColors("rgb(0, 0, 0)", "invalid", 0.5)).to.equal("rgb(0, 0, 0)");
+      expect(window.mixRgbColors("invalid_base", "invalid_overlay", 0.5)).to.equal("invalid_base");
+    });
   });
 
   describe("video URL parsing", () => {
