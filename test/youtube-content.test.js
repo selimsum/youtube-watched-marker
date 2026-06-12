@@ -84,6 +84,35 @@ describe("youtube-content.js", () => {
     });
   });
 
+  describe("isVideoUrl", () => {
+    it("should return true for standard watch URLs", () => {
+      expect(window.isVideoUrl("https://www.youtube.com/watch?v=12345678901")).to.be.true;
+      expect(window.isVideoUrl("/watch?v=12345678901")).to.be.true;
+    });
+
+    it("should return true for shorts URLs", () => {
+      expect(window.isVideoUrl("https://www.youtube.com/shorts/12345678901")).to.be.true;
+      expect(window.isVideoUrl("/shorts/12345678901")).to.be.true;
+    });
+
+    it("should return true for live URLs", () => {
+      expect(window.isVideoUrl("https://www.youtube.com/live/12345678901")).to.be.true;
+      expect(window.isVideoUrl("/live/12345678901")).to.be.true;
+    });
+
+    it("should return false for other YouTube URLs", () => {
+      expect(window.isVideoUrl("https://www.youtube.com/@channel")).to.be.false;
+      expect(window.isVideoUrl("https://www.youtube.com/feed/subscriptions")).to.be.false;
+      expect(window.isVideoUrl("https://www.youtube.com/")).to.be.false;
+    });
+
+    it("should return false for empty or falsy values", () => {
+      expect(window.isVideoUrl(null)).to.be.false;
+      expect(window.isVideoUrl(undefined)).to.be.false;
+      expect(window.isVideoUrl("")).to.be.false;
+    });
+  });
+
   describe("date parsing", () => {
     it("should parse relative unit days correctly", () => {
       expect(window.getRelativeUnitDays("day")).to.equal(1);
