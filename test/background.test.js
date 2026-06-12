@@ -69,6 +69,38 @@ describe("extractVideoIdFromUrl", () => {
     });
 });
 
+describe("isWorkerWatchUrl", () => {
+  it("should return true for valid YouTube worker URLs", () => {
+    assert.strictEqual(bg.isWorkerWatchUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ&ytwm_worker=1"), true);
+    assert.strictEqual(bg.isWorkerWatchUrl("https://www.youtube.com/watch?ytwm_worker=1&v=dQw4w9WgXcQ"), true);
+  });
+
+  it("should return false for YouTube URLs without the worker param", () => {
+    assert.strictEqual(bg.isWorkerWatchUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ"), false);
+    assert.strictEqual(bg.isWorkerWatchUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ&ytwm_worker=0"), false);
+    assert.strictEqual(bg.isWorkerWatchUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ&ytwm_worker="), false);
+  });
+
+  it("should return false for non-YouTube URLs with the worker param", () => {
+    assert.strictEqual(bg.isWorkerWatchUrl("https://example.com/watch?v=dQw4w9WgXcQ&ytwm_worker=1"), false);
+    assert.strictEqual(bg.isWorkerWatchUrl("https://notyoutube.com/watch?ytwm_worker=1"), false);
+  });
+
+  it("should return false for invalid URLs and null/undefined values", () => {
+    assert.strictEqual(bg.isWorkerWatchUrl("invalid-url"), false);
+    assert.strictEqual(bg.isWorkerWatchUrl(""), false);
+    assert.strictEqual(bg.isWorkerWatchUrl(null), false);
+    assert.strictEqual(bg.isWorkerWatchUrl(undefined), false);
+  });
+
+  it("should handle mobile/shorts/music YouTube URLs correctly", () => {
+    assert.strictEqual(bg.isWorkerWatchUrl("https://m.youtube.com/watch?v=dQw4w9WgXcQ&ytwm_worker=1"), true);
+    assert.strictEqual(bg.isWorkerWatchUrl("https://music.youtube.com/watch?v=dQw4w9WgXcQ&ytwm_worker=1"), true);
+    assert.strictEqual(bg.isWorkerWatchUrl("https://youtu.be/dQw4w9WgXcQ?ytwm_worker=1"), true);
+    assert.strictEqual(bg.isWorkerWatchUrl("https://www.youtube.com/shorts/dQw4w9WgXcQ?ytwm_worker=1"), true);
+  });
+});
+
 describe("isYouTubeHost", () => {
   it("should work", () => {
   assert.strictEqual(bg.isYouTubeHost('youtube.com'), true);
