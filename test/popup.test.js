@@ -67,3 +67,49 @@ describe("popup.js formatWindowBounds", () => {
     );
   });
 });
+
+describe("popup.js getQueueSummary", () => {
+  let context;
+  let getQueueSummary;
+
+  beforeEach(() => {
+    context = setupContext();
+    getQueueSummary = context.getQueueSummary;
+  });
+
+  it('returns default message for empty queue', () => {
+    assert.strictEqual(getQueueSummary([]), "No queued videos");
+  });
+
+  it('returns paused message for empty queue when paused', () => {
+    vm.runInContext('currentSettings.queuePaused = true', context);
+    assert.strictEqual(getQueueSummary([]), "Paused / No queued videos");
+  });
+
+  it('formats single running item', () => {
+    assert.strictEqual(getQueueSummary([{ status: 'running' }]), "1 running");
+  });
+
+  it('formats mixed statuses correctly', () => {
+    const queue = [
+      { status: 'running' },
+      { status: 'pending' },
+      { status: 'pending' },
+      { status: 'completed' },
+      { status: 'failed' }
+    ];
+    assert.strictEqual(getQueueSummary(queue), "1 running / 2 pending / 1 completed / 1 failed");
+  });
+
+  it('formats mixed statuses with paused setting correctly', () => {
+    vm.runInContext('currentSettings.queuePaused = true', context);
+    const queue = [
+      { status: 'running' },
+      { status: 'pending' },
+      { status: 'pending' },
+      { status: 'completed' },
+      { status: 'failed' }
+    ];
+    assert.strictEqual(getQueueSummary(queue), "Paused / 1 running / 2 pending / 1 completed / 1 failed");
+  });
+});
