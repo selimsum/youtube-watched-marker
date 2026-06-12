@@ -180,12 +180,6 @@ function getChannelVideosUrl(rawUrl) {
   return url.toString();
 }
 
-function delay(ms) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
-
 async function waitForTabComplete(tabId) {
   for (let attempt = 0; attempt < 40; attempt += 1) {
     const tab = await extensionApi.tabs.get(tabId);

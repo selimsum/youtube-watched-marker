@@ -75,12 +75,6 @@ const MONTHS = {
   aralik: 11
 };
 
-function delay(ms) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
-
 function updateDirectOpenState(state) {
   canOpenWorkerWindow = Boolean(
     state &&

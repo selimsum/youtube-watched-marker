@@ -14,6 +14,7 @@
   ],
   "background": {
     "scripts": [
+      "src/delay.js",
       "src/background.js"
     ],
     "persistent": true
@@ -25,6 +26,7 @@
         "*://m.youtube.com/*"
       ],
       "js": [
+        "src/delay.js",
         "src/youtube-content.js"
       ],
       "run_at": "document_idle"

@@ -959,12 +959,6 @@ async function handleRuntimeMessage(message) {
   return undefined;
 }
 
-function delay(ms) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
-
 function withTimeout(promise, timeoutMs, errorMessage) {
   let timeoutId;
   const timeout = new Promise((_resolve, reject) => {
@@ -1413,6 +1407,10 @@ async function waitForTabVideoUrl(tabId, videoId, timeoutMs) {
 }
 
 async function injectPlayerWorker(tabId) {
+  await extensionApi.tabs.executeScript(tabId, {
+    file: "src/delay.js",
+    runAt: "document_idle"
+  });
   await extensionApi.tabs.executeScript(tabId, {
     file: "src/player-worker.js",
     runAt: "document_idle"

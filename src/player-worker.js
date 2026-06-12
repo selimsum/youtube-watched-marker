@@ -19,12 +19,6 @@
   let activeRun = false;
   let runStartedAt = 0;
 
-  function delay(ms) {
-    return new Promise((resolve) => {
-      setTimeout(resolve, ms);
-    });
-  }
-
   function waitForEvent(target, eventName, timeoutMs) {
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
