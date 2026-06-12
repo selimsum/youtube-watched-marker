@@ -19,7 +19,8 @@ function setupContext() {
         onMessage: { addListener: () => {} },
         sendMessage: () => Promise.resolve()
       }
-    }
+    },
+    getExtensionApi: () => context.browser
   };
   vm.createContext(context);
   vm.runInContext(code, context);

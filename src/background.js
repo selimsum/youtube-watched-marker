@@ -40,14 +40,6 @@ const DEFAULT_WORKER_MODE = "window";
 let activeWorker = null;
 let retainedWorker = null;
 
-function getExtensionApi() {
-  if (typeof browser !== "undefined") {
-    return browser;
-  }
-
-  return chrome;
-}
-
 const extensionApi = getExtensionApi();
 
 function normalizeUrl(value) {
@@ -1414,6 +1406,10 @@ async function waitForTabVideoUrl(tabId, videoId, timeoutMs) {
 }
 
 async function injectPlayerWorker(tabId) {
+  await extensionApi.tabs.executeScript(tabId, {
+    file: "src/extension-api.js",
+    runAt: "document_idle"
+  });
   await extensionApi.tabs.executeScript(tabId, {
     file: "src/delay.js",
     runAt: "document_idle"

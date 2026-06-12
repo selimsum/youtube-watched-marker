@@ -27,6 +27,7 @@ describe("youtube-content.js", () => {
       }
     };
     window.browser = window.chrome;
+    window.getExtensionApi = () => window.browser;
 
     const scriptEl = document.createElement("script");
     scriptEl.textContent = sourceCode;
