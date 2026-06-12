@@ -21,7 +21,8 @@ function createEnvironment() {
     chrome: { runtime: { sendMessage: () => Promise.resolve({}), onMessage: { addListener: () => {} } } },
     browser: { runtime: { sendMessage: () => Promise.resolve({}), onMessage: { addListener: () => {} } } },
     MutationObserver: class { observe() {} disconnect() {} },
-    Date // Inject the host Date so it uses our mocked Date.now
+    Date, // Inject the host Date so it uses our mocked Date.now
+    getExtensionApi: () => context.browser
   });
 
   vm.runInContext(code, context);

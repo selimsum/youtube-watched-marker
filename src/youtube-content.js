@@ -26,14 +26,6 @@ let overlayMenuItem = null;
 let cachedMenuColors = null;
 let cachedMenuColorsIsDark = null;
 
-function getExtensionApi() {
-  if (typeof browser !== "undefined") {
-    return browser;
-  }
-
-  return chrome;
-}
-
 const extensionApi = getExtensionApi();
 
 const MONTHS = {

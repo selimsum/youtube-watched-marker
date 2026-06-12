@@ -41,6 +41,8 @@ global.browser = {
 // Also add chrome as a fallback in case browser doesn't cover something
 global.chrome = global.browser;
 
+global.getExtensionApi = () => global.browser;
+
 const bg = require('../src/background.js');
 
 describe("cleanVideoId", () => {

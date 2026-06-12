@@ -1,13 +1,5 @@
 "use strict";
 
-function getExtensionApi() {
-  if (typeof browser !== "undefined") {
-    return browser;
-  }
-
-  return chrome;
-}
-
 const extensionApi = getExtensionApi();
 const queueList = document.getElementById("queueList");
 const emptyState = document.getElementById("emptyState");
