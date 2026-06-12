@@ -1988,6 +1988,7 @@ if (typeof module !== "undefined") {
   module.exports = {
     cleanVideoId,
     extractVideoIdFromUrl,
+    isWorkerWatchUrl,
     isYouTubeHost,
     normalizeUrl,
     urlsMatchIgnoringEncoding
