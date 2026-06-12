@@ -387,7 +387,14 @@ async function bulkEnqueueVideos(videos, source, channelUrl) {
 }
 
 function getActiveQueueCount(queue) {
-  return queue.filter((item) => ["pending", "running"].includes(item.status)).length;
+  let count = 0;
+  for (let i = 0; i < queue.length; i++) {
+    const status = queue[i].status;
+    if (status === "pending" || status === "running") {
+      count += 1;
+    }
+  }
+  return count;
 }
 
 async function clearQueue() {
