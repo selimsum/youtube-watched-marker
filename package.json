@@ -7,9 +7,11 @@
   "scripts": {
     "check": "node --check src/background.js && node --check src/player-worker.js && node --check src/youtube-content.js && node --check popup/popup.js",
     "lint": "web-ext lint --source-dir . --ignore-files package.json package-lock.json node_modules web-ext-artifacts test",
-    "build": "web-ext build --source-dir . --artifacts-dir web-ext-artifacts --overwrite-dest --ignore-files package.json package-lock.json node_modules web-ext-artifacts README.md test"
+    "build": "web-ext build --source-dir . --artifacts-dir web-ext-artifacts --overwrite-dest --ignore-files package.json package-lock.json node_modules web-ext-artifacts README.md test",
+    "test": "mocha test/**/*.test.js"
   },
   "devDependencies": {
+    "mocha": "^11.7.6",
     "web-ext": "^8.9.0"
   }
 }
