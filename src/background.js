@@ -320,9 +320,13 @@ async function bulkEnqueueVideos(videos, source, channelUrl) {
 
   const queue = await getQueue();
   const settings = await getSettings();
-  const activeVideoIds = new Set(queue
-    .filter((item) => ["pending", "running"].includes(item.status))
-    .map((item) => item.videoId));
+  const activeVideoIds = new Set();
+  for (let i = 0; i < queue.length; i++) {
+    const item = queue[i];
+    if (item.status === "pending" || item.status === "running") {
+      activeVideoIds.add(item.videoId);
+    }
+  }
   const createdItems = [];
   const seenInputIds = new Set();
   let availableSlots = Math.max(0, settings.maxQueueSize - getActiveQueueCount(queue));
