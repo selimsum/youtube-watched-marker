@@ -24,14 +24,6 @@ let pendingOpenedWorkerUrl = null;
 let canOpenWorkerWindow = true;
 let overlayMenuItem = null;
 
-function getExtensionApi() {
-  if (typeof browser !== "undefined") {
-    return browser;
-  }
-
-  return chrome;
-}
-
 const extensionApi = getExtensionApi();
 
 const MONTHS = {

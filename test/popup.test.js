@@ -5,6 +5,9 @@ const vm = require("vm");
 // Read popup.js
 const popupCode = fs.readFileSync("popup/popup.js", "utf8");
 
+// Read extension.js
+const extensionCode = fs.readFileSync("src/utils/extension.js", "utf8");
+
 // Mock the environment
 const sandbox = {
   chrome: {
@@ -61,6 +64,7 @@ const sandbox = {
 };
 
 vm.createContext(sandbox);
+vm.runInContext(extensionCode, sandbox);
 vm.runInContext(popupCode, sandbox);
 
 describe("formatDate", () => {
