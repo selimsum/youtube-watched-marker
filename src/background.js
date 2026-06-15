@@ -130,7 +130,7 @@ function cleanTitle(title) {
     return "";
   }
 
-  return title.replace(/\s+/g, " ").replace(/ - YouTube$/, "").trim();
+  return title.replace(/\s+/g, " ").trim().replace(/ - YouTube$/, "");
 }
 
 async function getQueue() {
@@ -1987,6 +1987,7 @@ resetStaleRunningItems()
 
 if (typeof module !== "undefined") {
   module.exports = {
+    cleanTitle,
     cleanVideoId,
     extractVideoIdFromUrl,
     isWorkerWatchUrl,

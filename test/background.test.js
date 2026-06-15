@@ -45,6 +45,38 @@ global.getExtensionApi = () => global.browser;
 
 const bg = require('../src/background.js');
 
+describe("cleanTitle", () => {
+  it("should return empty string for falsy or non-string inputs", () => {
+    assert.strictEqual(bg.cleanTitle(null), "");
+    assert.strictEqual(bg.cleanTitle(undefined), "");
+    assert.strictEqual(bg.cleanTitle(""), "");
+    assert.strictEqual(bg.cleanTitle(123), "");
+    assert.strictEqual(bg.cleanTitle({}), "");
+    assert.strictEqual(bg.cleanTitle(true), "");
+  });
+
+  it("should trim leading and trailing whitespace", () => {
+    assert.strictEqual(bg.cleanTitle("  Some Title  "), "Some Title");
+    assert.strictEqual(bg.cleanTitle("\nTitle\t"), "Title");
+  });
+
+  it("should collapse multiple consecutive spaces", () => {
+    assert.strictEqual(bg.cleanTitle("Some    Long   Title"), "Some Long Title");
+    assert.strictEqual(bg.cleanTitle("Title \n \t With \r Spaces"), "Title With Spaces");
+  });
+
+  it("should remove ' - YouTube' suffix", () => {
+    assert.strictEqual(bg.cleanTitle("Awesome Video - YouTube"), "Awesome Video");
+    assert.strictEqual(bg.cleanTitle("  Awesome Video - YouTube  "), "Awesome Video");
+    assert.strictEqual(bg.cleanTitle("Awesome Video - YouTube Channel"), "Awesome Video - YouTube Channel"); // Should only remove at the end
+    assert.strictEqual(bg.cleanTitle("Awesome Video- YouTube"), "Awesome Video- YouTube"); // Must match the space before dash
+  });
+
+  it("should handle combinations of issues", () => {
+    assert.strictEqual(bg.cleanTitle("  Very   Messy   Title  - YouTube  "), "Very Messy Title");
+  });
+});
+
 describe("cleanVideoId", () => {
   it("should work", () => {
   assert.strictEqual(bg.cleanVideoId('dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
