@@ -7,14 +7,6 @@
 
   window.__youtubeWatchedMarkerPlayerWorkerLoaded = true;
 
-  function getExtensionApi() {
-    if (typeof browser !== "undefined") {
-      return browser;
-    }
-
-    return chrome;
-  }
-
   const extensionApi = getExtensionApi();
   let activeRun = false;
   let runStartedAt = 0;
