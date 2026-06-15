@@ -23,8 +23,14 @@ let pendingOpenedWorkerWindow = null;
 let pendingOpenedWorkerUrl = null;
 let canOpenWorkerWindow = true;
 let overlayMenuItem = null;
-let cachedMenuColors = null;
-let cachedMenuColorsIsDark = null;
+
+function getExtensionApi() {
+  if (typeof browser !== "undefined") {
+    return browser;
+  }
+
+  return chrome;
+}
 
 const extensionApi = getExtensionApi();
 
@@ -1015,13 +1021,8 @@ function setMenuItemHover(item, active) {
 }
 
 function getMenuColors() {
-  const isPageDark = isDarkThemeFromPage();
-
-  if (cachedMenuColors && cachedMenuColorsIsDark === isPageDark) {
-    return cachedMenuColors;
-  }
-
   const rootStyle = window.getComputedStyle(document.documentElement);
+  const isPageDark = isDarkThemeFromPage();
   const text = normalizeCssColor(
     rootStyle.getPropertyValue("--yt-spec-text-primary"),
     isPageDark ? DARK_MENU_TEXT : LIGHT_MENU_TEXT
@@ -1038,14 +1039,11 @@ function getMenuColors() {
     background = textIsDark ? LIGHT_MENU_BACKGROUND : DARK_MENU_BACKGROUND;
   }
 
-  cachedMenuColorsIsDark = isPageDark;
-  cachedMenuColors = {
+  return {
     background,
     hoverBackground: mixRgbColors(background, text, isDarkColor(background) ? 0.16 : 0.08),
     text
   };
-
-  return cachedMenuColors;
 }
 
 function isDarkThemeFromPage() {

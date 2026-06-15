@@ -40,6 +40,14 @@ const DEFAULT_WORKER_MODE = "window";
 let activeWorker = null;
 let retainedWorker = null;
 
+function getExtensionApi() {
+  if (typeof browser !== "undefined") {
+    return browser;
+  }
+
+  return chrome;
+}
+
 const extensionApi = getExtensionApi();
 
 function normalizeUrl(value) {
@@ -52,18 +60,6 @@ function normalizeUrl(value) {
   } catch (_error) {
     return null;
   }
-}
-
-function isYouTubeHost(hostname) {
-  const host = String(hostname || "").toLowerCase();
-  return (
-    host === "youtube.com" ||
-    host === "www.youtube.com" ||
-    host === "m.youtube.com" ||
-    host === "music.youtube.com" ||
-    host.endsWith(".youtube.com") ||
-    host === "youtu.be"
-  );
 }
 
 function cleanVideoId(value) {
@@ -379,14 +375,7 @@ async function bulkEnqueueVideos(videos, source, channelUrl) {
 }
 
 function getActiveQueueCount(queue) {
-  let count = 0;
-  for (let i = 0; i < queue.length; i++) {
-    const status = queue[i].status;
-    if (status === "pending" || status === "running") {
-      count += 1;
-    }
-  }
-  return count;
+  return queue.filter((item) => ["pending", "running"].includes(item.status)).length;
 }
 
 async function clearQueue() {
@@ -1310,37 +1299,21 @@ async function forceWorkerWindowBounds(windowId, bounds) {
   });
 }
 
-async function waitForTabCondition(tabId, conditionFn, timeoutMs, timeoutMessage, pollIntervalMs = null) {
+async function waitForTabComplete(tabId, timeoutMs) {
   const initialTab = await extensionApi.tabs.get(tabId);
 
-  if (conditionFn(initialTab)) {
+  if (initialTab.status === "complete") {
     return;
   }
 
   await withTimeout(new Promise((resolve, reject) => {
-    let pollId = null;
-
     function cleanup() {
-      if (pollId !== null) clearInterval(pollId);
       extensionApi.tabs.onUpdated.removeListener(onUpdated);
       extensionApi.tabs.onRemoved.removeListener(onRemoved);
     }
 
-    async function checkCurrentTab() {
-      try {
-        const currentTab = await extensionApi.tabs.get(tabId);
-        if (conditionFn(currentTab)) {
-          cleanup();
-          resolve();
-        }
-      } catch (error) {
-        cleanup();
-        reject(error);
-      }
-    }
-
-    function onUpdated(updatedTabId, changeInfo, updatedTab) {
-      if (updatedTabId === tabId && conditionFn(updatedTab, changeInfo)) {
+    function onUpdated(updatedTabId, changeInfo) {
+      if (updatedTabId === tabId && changeInfo.status === "complete") {
         cleanup();
         resolve();
       }
@@ -1353,25 +1326,9 @@ async function waitForTabCondition(tabId, conditionFn, timeoutMs, timeoutMessage
       }
     }
 
-    if (pollIntervalMs !== null) {
-      pollId = setInterval(() => {
-        checkCurrentTab().catch(reject);
-      }, pollIntervalMs);
-    }
-
     extensionApi.tabs.onUpdated.addListener(onUpdated);
     extensionApi.tabs.onRemoved.addListener(onRemoved);
-    checkCurrentTab().catch(reject);
-  }), timeoutMs, timeoutMessage);
-}
-
-async function waitForTabComplete(tabId, timeoutMs) {
-  await waitForTabCondition(
-    tabId,
-    (tab, changeInfo) => tab.status === "complete" || (changeInfo && changeInfo.status === "complete"),
-    timeoutMs,
-    "tab-load-timeout"
-  );
+  }), timeoutMs, "tab-load-timeout");
 }
 
 function tabMatchesVideo(tab, videoId) {
@@ -1396,20 +1353,57 @@ function getRequiredVideoIdFromUrl(url) {
 }
 
 async function waitForTabVideoUrl(tabId, videoId, timeoutMs) {
-  await waitForTabCondition(
-    tabId,
-    (tab) => tabMatchesVideo(tab, videoId),
-    timeoutMs,
-    "tab-video-url-timeout",
-    250
-  );
+  const initialTab = await extensionApi.tabs.get(tabId);
+
+  if (tabMatchesVideo(initialTab, videoId)) {
+    return;
+  }
+
+  await withTimeout(new Promise((resolve, reject) => {
+    function cleanup() {
+      clearInterval(pollId);
+      extensionApi.tabs.onUpdated.removeListener(onUpdated);
+      extensionApi.tabs.onRemoved.removeListener(onRemoved);
+    }
+
+    async function checkCurrentTab() {
+      try {
+        const currentTab = await extensionApi.tabs.get(tabId);
+        if (tabMatchesVideo(currentTab, videoId)) {
+          cleanup();
+          resolve();
+        }
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
+    }
+
+    function onUpdated(updatedTabId, _changeInfo, updatedTab) {
+      if (updatedTabId === tabId && tabMatchesVideo(updatedTab, videoId)) {
+        cleanup();
+        resolve();
+      }
+    }
+
+    function onRemoved(removedTabId) {
+      if (removedTabId === tabId) {
+        cleanup();
+        reject(new Error("worker-tab-closed"));
+      }
+    }
+
+    const pollId = setInterval(() => {
+      checkCurrentTab().catch(reject);
+    }, 250);
+
+    extensionApi.tabs.onUpdated.addListener(onUpdated);
+    extensionApi.tabs.onRemoved.addListener(onRemoved);
+    checkCurrentTab().catch(reject);
+  }), timeoutMs, "tab-video-url-timeout");
 }
 
 async function injectPlayerWorker(tabId) {
-  await extensionApi.tabs.executeScript(tabId, {
-    file: "src/extension-api.js",
-    runAt: "document_idle"
-  });
   await extensionApi.tabs.executeScript(tabId, {
     file: "src/delay.js",
     runAt: "document_idle"
@@ -1986,12 +1980,10 @@ resetStaleRunningItems()
   .catch(console.error);
 
 if (typeof module !== "undefined") {
+  var { isYouTubeHost } = require("./utils/youtube");
   module.exports = {
     cleanVideoId,
     extractVideoIdFromUrl,
-    isWorkerWatchUrl,
-    isYouTubeHost,
-    normalizeUrl,
-    urlsMatchIgnoringEncoding
+    isYouTubeHost
   };
 }

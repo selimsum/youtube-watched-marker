@@ -14,7 +14,7 @@
   ],
   "background": {
     "scripts": [
-      "src/extension-api.js",
+      "src/utils/youtube.js",
       "src/delay.js",
       "src/background.js"
     ],
@@ -27,7 +27,6 @@
         "*://m.youtube.com/*"
       ],
       "js": [
-        "src/extension-api.js",
         "src/delay.js",
         "src/youtube-content.js"
       ],

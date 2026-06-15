@@ -1,5 +1,13 @@
 "use strict";
 
+function getExtensionApi() {
+  if (typeof browser !== "undefined") {
+    return browser;
+  }
+
+  return chrome;
+}
+
 const extensionApi = getExtensionApi();
 const queueList = document.getElementById("queueList");
 const emptyState = document.getElementById("emptyState");
@@ -129,11 +137,6 @@ function setChannelStatus(text) {
   channelScanStatus.textContent = text;
 }
 
-function isYouTubeHost(hostname) {
-  const host = String(hostname || "").toLowerCase();
-  return host === "youtube.com" || host.endsWith(".youtube.com");
-}
-
 function getChannelVideosUrl(rawUrl) {
   let url;
 
@@ -170,6 +173,12 @@ function getChannelVideosUrl(rawUrl) {
   url.search = "";
   url.hash = "";
   return url.toString();
+}
+
+function delay(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 async function waitForTabComplete(tabId) {
