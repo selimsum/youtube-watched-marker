@@ -3,7 +3,7 @@ const fs = require("fs");
 const vm = require("vm");
 
 // Read popup.js
-const popupCode = fs.readFileSync("popup/popup.js", "utf8");
+const popupCode = fs.readFileSync("src/utils/extension.js", "utf8") + "\n" + fs.readFileSync("popup/popup.js", "utf8");
 
 // Mock the environment
 const sandbox = {

@@ -3,7 +3,7 @@ const fs = require("fs");
 const vm = require("vm");
 
 // Read background.js
-const backgroundCode = fs.readFileSync("src/background.js", "utf8");
+const backgroundCode = fs.readFileSync("src/utils/extension.js", "utf8") + "\n" + fs.readFileSync("src/background.js", "utf8");
 
 // Mock the environment
 const sandbox = {
@@ -79,5 +79,50 @@ describe("normalizeSettingNumber", () => {
     assert.strictEqual(sandbox.normalizeSettingNumber("abc", 10, 1, 20), 10);
     assert.strictEqual(sandbox.normalizeSettingNumber(Infinity, 10, 1, 20), 10);
     assert.strictEqual(sandbox.normalizeSettingNumber(-Infinity, 10, 1, 20), 10);
+  });
+});
+
+describe("getActiveQueueCount", () => {
+  it("should return 0 for an empty queue", () => {
+    assert.strictEqual(sandbox.getActiveQueueCount([]), 0);
+  });
+
+  it("should count only 'pending' items", () => {
+    const queue = [
+      { status: "pending" },
+      { status: "completed" },
+      { status: "error" },
+      { status: "pending" }
+    ];
+    assert.strictEqual(sandbox.getActiveQueueCount(queue), 2);
+  });
+
+  it("should count only 'running' items", () => {
+    const queue = [
+      { status: "running" },
+      { status: "completed" },
+      { status: "running" }
+    ];
+    assert.strictEqual(sandbox.getActiveQueueCount(queue), 2);
+  });
+
+  it("should count both 'pending' and 'running' items", () => {
+    const queue = [
+      { status: "pending" },
+      { status: "running" },
+      { status: "completed" },
+      { status: "error" },
+      { status: "running" }
+    ];
+    assert.strictEqual(sandbox.getActiveQueueCount(queue), 3);
+  });
+
+  it("should return 0 when there are no active items", () => {
+    const queue = [
+      { status: "completed" },
+      { status: "error" },
+      { status: "cancelled" }
+    ];
+    assert.strictEqual(sandbox.getActiveQueueCount(queue), 0);
   });
 });
