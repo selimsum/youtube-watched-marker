@@ -2,7 +2,8 @@ const assert = require("assert");
 const fs = require("fs");
 const vm = require("vm");
 
-// Read popup.js
+// Read extension.js and popup.js
+const utilsCode = fs.readFileSync("src/utils/extension.js", "utf8");
 const popupCode = fs.readFileSync("popup/popup.js", "utf8");
 
 // Mock the environment
@@ -61,6 +62,7 @@ const sandbox = {
 };
 
 vm.createContext(sandbox);
+vm.runInContext(utilsCode, sandbox);
 vm.runInContext(popupCode, sandbox);
 
 describe("formatDate", () => {
