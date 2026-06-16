@@ -2,7 +2,8 @@ const assert = require("assert");
 const fs = require("fs");
 const vm = require("vm");
 
-// Read background.js
+// Read extension utils and background.js
+const utilsCode = fs.readFileSync("src/utils/extension.js", "utf8");
 const backgroundCode = fs.readFileSync("src/background.js", "utf8");
 
 // Mock the environment
@@ -44,6 +45,7 @@ const sandbox = {
 };
 
 vm.createContext(sandbox);
+vm.runInContext(utilsCode, sandbox);
 vm.runInContext(backgroundCode, sandbox);
 
 describe("normalizeSettingNumber", () => {
