@@ -2,7 +2,8 @@ const assert = require("assert");
 const fs = require("fs");
 const vm = require("vm");
 
-// Read background.js
+// Read utils/extension.js and background.js
+const utilsCode = fs.readFileSync("src/utils/extension.js", "utf8");
 const backgroundCode = fs.readFileSync("src/background.js", "utf8");
 
 // Mock the environment
@@ -40,10 +41,13 @@ const sandbox = {
   JSON: JSON,
   Promise: Promise,
   Object: Object,
-  Boolean: Boolean
+  Boolean: Boolean,
+  URL: URL,
+  URLSearchParams: URLSearchParams
 };
 
 vm.createContext(sandbox);
+vm.runInContext(utilsCode, sandbox);
 vm.runInContext(backgroundCode, sandbox);
 
 describe("normalizeSettingNumber", () => {
@@ -79,5 +83,12 @@ describe("normalizeSettingNumber", () => {
     assert.strictEqual(sandbox.normalizeSettingNumber("abc", 10, 1, 20), 10);
     assert.strictEqual(sandbox.normalizeSettingNumber(Infinity, 10, 1, 20), 10);
     assert.strictEqual(sandbox.normalizeSettingNumber(-Infinity, 10, 1, 20), 10);
+  });
+});
+
+describe("buildWatchUrl", () => {
+  it("should return the correct watch url with required parameters", () => {
+    const expectedUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ&ytwm_worker=1&mute=1&autoplay=0";
+    assert.strictEqual(sandbox.buildWatchUrl("dQw4w9WgXcQ"), expectedUrl);
   });
 });
