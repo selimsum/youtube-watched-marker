@@ -2,7 +2,8 @@ const assert = require("assert");
 const fs = require("fs");
 const vm = require("vm");
 
-// Read popup.js
+// Read extension utils and popup.js
+const utilsCode = fs.readFileSync("src/utils/extension.js", "utf8");
 const popupCode = fs.readFileSync("popup/popup.js", "utf8");
 
 // Mock the environment
@@ -61,6 +62,7 @@ const sandbox = {
 };
 
 vm.createContext(sandbox);
+vm.runInContext(utilsCode, sandbox);
 vm.runInContext(popupCode, sandbox);
 
 describe("formatDate", () => {
@@ -90,5 +92,50 @@ describe("formatDate", () => {
     });
 
     assert.strictEqual(result, expected);
+  });
+});
+
+describe("parseInputDate", () => {
+  it("should parse valid YYYY-MM-DD dates", () => {
+    const result = sandbox.parseInputDate("2023-05-15");
+    assert.strictEqual(result.getTime(), new Date(2023, 4, 15).getTime());
+  });
+
+  it("should parse valid DD.MM.YYYY dates", () => {
+    const result = sandbox.parseInputDate("15.05.2023");
+    assert.strictEqual(result.getTime(), new Date(2023, 4, 15).getTime());
+  });
+
+  it("should handle single-digit days and months in YYYY-MM-DD format", () => {
+    const result = sandbox.parseInputDate("2023-5-5");
+    assert.strictEqual(result.getTime(), new Date(2023, 4, 5).getTime());
+  });
+
+  it("should handle single-digit days and months in DD.MM.YYYY format", () => {
+    const result = sandbox.parseInputDate("5.5.2023");
+    assert.strictEqual(result.getTime(), new Date(2023, 4, 5).getTime());
+  });
+
+  it("should handle whitespace", () => {
+    const result = sandbox.parseInputDate("  2023-05-15  ");
+    assert.strictEqual(result.getTime(), new Date(2023, 4, 15).getTime());
+  });
+
+  it("should return null for invalid dates that don't exist", () => {
+    assert.strictEqual(sandbox.parseInputDate("2023-02-29"), null); // Not a leap year
+    assert.strictEqual(sandbox.parseInputDate("2023-13-01"), null);
+    assert.strictEqual(sandbox.parseInputDate("29.02.2023"), null);
+  });
+
+  it("should return null for invalid string formats", () => {
+    assert.strictEqual(sandbox.parseInputDate("not a date"), null);
+    assert.strictEqual(sandbox.parseInputDate("2023/05/15"), null);
+    assert.strictEqual(sandbox.parseInputDate("2023-05"), null);
+  });
+
+  it("should return null for empty, null, or undefined inputs", () => {
+    assert.strictEqual(sandbox.parseInputDate(""), null);
+    assert.strictEqual(sandbox.parseInputDate(null), null);
+    assert.strictEqual(sandbox.parseInputDate(undefined), null);
   });
 });
