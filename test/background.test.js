@@ -237,3 +237,29 @@ describe("getActiveQueueCount", () => {
     assert.strictEqual(sandbox.getActiveQueueCount(queue), 0);
   });
 });
+
+describe("normalizeUrl", () => {
+  it("should return a URL object for a valid URL string", () => {
+    const url = sandbox.normalizeUrl("https://example.com/path?query=1");
+    assert.ok(url instanceof URL);
+    assert.strictEqual(url.href, "https://example.com/path?query=1");
+  });
+
+  it("should return null for an invalid URL string", () => {
+    assert.strictEqual(sandbox.normalizeUrl("not-a-url"), null);
+    assert.strictEqual(sandbox.normalizeUrl("http://"), null);
+  });
+
+  it("should return null for non-string inputs", () => {
+    assert.strictEqual(sandbox.normalizeUrl(null), null);
+    assert.strictEqual(sandbox.normalizeUrl(undefined), null);
+    assert.strictEqual(sandbox.normalizeUrl(123), null);
+    assert.strictEqual(sandbox.normalizeUrl({}), null);
+    assert.strictEqual(sandbox.normalizeUrl([]), null);
+    assert.strictEqual(sandbox.normalizeUrl(true), null);
+  });
+
+  it("should return null for empty string", () => {
+    assert.strictEqual(sandbox.normalizeUrl(""), null);
+  });
+});
