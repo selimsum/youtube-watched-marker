@@ -84,6 +84,43 @@ describe("normalizeSettingNumber", () => {
   });
 });
 
+describe("cleanVideoId", () => {
+  it("should return null for falsy inputs", () => {
+    assert.strictEqual(sandbox.cleanVideoId(null), null);
+    assert.strictEqual(sandbox.cleanVideoId(undefined), null);
+    assert.strictEqual(sandbox.cleanVideoId(""), null);
+    assert.strictEqual(sandbox.cleanVideoId(false), null);
+  });
+
+  it("should return the video ID for valid 11-character alphanumeric strings", () => {
+    assert.strictEqual(sandbox.cleanVideoId("dQw4w9WgXcQ"), "dQw4w9WgXcQ");
+    assert.strictEqual(sandbox.cleanVideoId("1234567890a"), "1234567890a");
+    assert.strictEqual(sandbox.cleanVideoId("a-b_c-d_e-f"), "a-b_c-d_e-f");
+  });
+
+  it("should trim whitespace from valid video IDs", () => {
+    assert.strictEqual(sandbox.cleanVideoId("  dQw4w9WgXcQ  "), "dQw4w9WgXcQ");
+    assert.strictEqual(sandbox.cleanVideoId("\n\tdQw4w9WgXcQ\r\n"), "dQw4w9WgXcQ");
+  });
+
+  it("should return null for malformed video IDs", () => {
+    assert.strictEqual(sandbox.cleanVideoId("dQw4w9WgXc"), null); // Too short
+    assert.strictEqual(sandbox.cleanVideoId("dQw4w9WgXcQ1"), null); // Too long
+    assert.strictEqual(sandbox.cleanVideoId("dQw4w9WgXc!"), null); // Invalid characters
+    assert.strictEqual(sandbox.cleanVideoId("dQw4w9WgXc "), null);
+  });
+
+  it("should convert non-string inputs to strings before validating", () => {
+    // These end up as strings that are not 11 valid chars, so they return null,
+    // but we can pass a mocked object that toStrings to a valid ID.
+    const mockId = { toString: () => "dQw4w9WgXcQ" };
+    assert.strictEqual(sandbox.cleanVideoId(mockId), "dQw4w9WgXcQ");
+
+    // A number that is 11 digits long
+    assert.strictEqual(sandbox.cleanVideoId(12345678901), "12345678901");
+  });
+});
+
 describe("extractVideoIdFromUrl", () => {
   it("should extract video ID from standard /watch?v= URLs", () => {
     assert.strictEqual(sandbox.extractVideoIdFromUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ"), "dQw4w9WgXcQ");
