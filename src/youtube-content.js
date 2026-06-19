@@ -16,6 +16,69 @@ const CHANNEL_SCAN_MAX_SCROLLS = 120;
 const CHANNEL_SCAN_STABLE_SCROLLS = 4;
 const CHANNEL_SCAN_RECENT_OLDER_COUNT = 8;
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+const VIDEO_CONTAINER_SELECTOR = [
+  "ytd-rich-item-renderer",
+  "ytd-rich-grid-media",
+  "ytd-rich-grid-slim-media",
+  "yt-lockup-view-model",
+  "yt-lockup-metadata-view-model",
+  "ytd-video-renderer",
+  "ytd-compact-video-renderer",
+  "ytd-grid-video-renderer",
+  "ytd-playlist-video-renderer",
+  "ytd-reel-item-renderer",
+  "ytd-radio-renderer",
+  "ytd-channel-video-player-renderer",
+  "ytd-watch-flexy"
+].join(",");
+
+const VIDEO_CONTAINERS_SELECTOR = [
+  "ytd-rich-item-renderer",
+  "ytd-rich-grid-media",
+  "ytd-rich-grid-slim-media",
+  "yt-lockup-view-model",
+  "yt-lockup-metadata-view-model",
+  "ytd-video-renderer",
+  "ytd-compact-video-renderer",
+  "ytd-grid-video-renderer",
+  "ytd-playlist-video-renderer",
+  "ytd-reel-item-renderer",
+  "ytd-radio-renderer"
+].join(",");
+
+const WORKER_WINDOW_FEATURES = [
+  "popup=yes",
+  `left=${WORKER_WINDOW_BOUNDS.left}`,
+  `top=${WORKER_WINDOW_BOUNDS.top}`,
+  `width=${WORKER_WINDOW_BOUNDS.width}`,
+  `height=${WORKER_WINDOW_BOUNDS.height}`
+].join(",");
+
+const MENU_LIST_SELECTOR = [
+  "tp-yt-paper-listbox",
+  "#items",
+  "ytd-menu-popup-renderer",
+  "yt-list-view-model"
+].join(",");
+
+const MENU_ITEMS_SELECTOR = [
+  "[role='menuitem']",
+  "ytd-menu-service-item-renderer",
+  "ytd-toggle-menu-service-item-renderer",
+  "yt-list-item-view-model",
+  "button",
+  "a"
+].join(",");
+
+const MENU_POPUP_SELECTOR = [
+  "ytd-menu-popup-renderer",
+  "tp-yt-paper-listbox",
+  "tp-yt-iron-dropdown",
+  "ytd-popup-container",
+  "yt-list-view-model"
+].join(",");
+
 let scanTimer = null;
 let lastMenuVideoUrl = null;
 let lastMenuVideoTitle = "";
@@ -619,46 +682,18 @@ function findVideoUrlInContainer(container) {
 }
 
 function getVideoContainer(element) {
-  return element && element.closest && element.closest([
-    "ytd-rich-item-renderer",
-    "ytd-rich-grid-media",
-    "ytd-rich-grid-slim-media",
-    "yt-lockup-view-model",
-    "yt-lockup-metadata-view-model",
-    "ytd-video-renderer",
-    "ytd-compact-video-renderer",
-    "ytd-grid-video-renderer",
-    "ytd-playlist-video-renderer",
-    "ytd-reel-item-renderer",
-    "ytd-radio-renderer",
-    "ytd-channel-video-player-renderer",
-    "ytd-watch-flexy"
-  ].join(","));
+  return element && element.closest && element.closest(VIDEO_CONTAINER_SELECTOR);
 }
 
 function getVideoContainers(root) {
-  const selector = [
-    "ytd-rich-item-renderer",
-    "ytd-rich-grid-media",
-    "ytd-rich-grid-slim-media",
-    "yt-lockup-view-model",
-    "yt-lockup-metadata-view-model",
-    "ytd-video-renderer",
-    "ytd-compact-video-renderer",
-    "ytd-grid-video-renderer",
-    "ytd-playlist-video-renderer",
-    "ytd-reel-item-renderer",
-    "ytd-radio-renderer"
-  ].join(",");
-
   const containers = [];
 
-  if (root.nodeType === Node.ELEMENT_NODE && root.matches(selector)) {
+  if (root.nodeType === Node.ELEMENT_NODE && root.matches(VIDEO_CONTAINERS_SELECTOR)) {
     containers.push(root);
   }
 
   if (root.querySelectorAll) {
-    containers.push(...root.querySelectorAll(selector));
+    containers.push(...root.querySelectorAll(VIDEO_CONTAINERS_SELECTOR));
   }
 
   return containers;
@@ -829,16 +864,8 @@ function openWorkerWindow(workerUrl) {
     return null;
   }
 
-  const features = [
-    "popup=yes",
-    `left=${WORKER_WINDOW_BOUNDS.left}`,
-    `top=${WORKER_WINDOW_BOUNDS.top}`,
-    `width=${WORKER_WINDOW_BOUNDS.width}`,
-    `height=${WORKER_WINDOW_BOUNDS.height}`
-  ].join(",");
-
   try {
-    return window.open(workerUrl, `ytwm-worker-${Date.now()}`, features);
+    return window.open(workerUrl, `ytwm-worker-${Date.now()}`, WORKER_WINDOW_FEATURES);
   } catch (_error) {
     return null;
   }
@@ -1214,12 +1241,7 @@ function getMenuList(menu) {
     return menu;
   }
 
-  return menu.querySelector([
-    "tp-yt-paper-listbox",
-    "#items",
-    "ytd-menu-popup-renderer",
-    "yt-list-view-model"
-  ].join(","));
+  return menu.querySelector(MENU_LIST_SELECTOR);
 }
 
 function injectIntoMenu(menu) {
@@ -1276,14 +1298,7 @@ function removeOverlayMenuItem() {
 }
 
 function hasNativeMenuItems(list) {
-  return Array.from(list.querySelectorAll([
-    "[role='menuitem']",
-    "ytd-menu-service-item-renderer",
-    "ytd-toggle-menu-service-item-renderer",
-    "yt-list-item-view-model",
-    "button",
-    "a"
-  ].join(","))).some((child) => (
+  return Array.from(list.querySelectorAll(MENU_ITEMS_SELECTOR)).some((child) => (
     !child.matches(MENU_ITEM_SELECTOR) &&
     child.getBoundingClientRect().height > 0
   ));
@@ -1296,20 +1311,12 @@ function hasUsableMenuTarget() {
 function scanMenus(root) {
   const menus = [];
 
-  const selector = [
-    "ytd-menu-popup-renderer",
-    "tp-yt-paper-listbox",
-    "tp-yt-iron-dropdown",
-    "ytd-popup-container",
-    "yt-list-view-model"
-  ].join(",");
-
-  if (root.nodeType === Node.ELEMENT_NODE && root.matches(selector)) {
+  if (root.nodeType === Node.ELEMENT_NODE && root.matches(MENU_POPUP_SELECTOR)) {
     menus.push(root);
   }
 
   if (root.querySelectorAll) {
-    menus.push(...root.querySelectorAll(selector));
+    menus.push(...root.querySelectorAll(MENU_POPUP_SELECTOR));
   }
 
   for (const menu of menus) {
