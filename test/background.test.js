@@ -126,3 +126,48 @@ describe("getActiveQueueCount", () => {
     assert.strictEqual(sandbox.getActiveQueueCount(queue), 0);
   });
 });
+
+describe("cleanTitle", () => {
+  it("should return empty string for falsy and non-string inputs", () => {
+    assert.strictEqual(sandbox.cleanTitle(null), "");
+    assert.strictEqual(sandbox.cleanTitle(undefined), "");
+    assert.strictEqual(sandbox.cleanTitle(123), "");
+    assert.strictEqual(sandbox.cleanTitle({}), "");
+    assert.strictEqual(sandbox.cleanTitle([]), "");
+    assert.strictEqual(sandbox.cleanTitle(""), "");
+  });
+
+  it("should replace multiple spaces, tabs, and newlines with a single space", () => {
+    assert.strictEqual(sandbox.cleanTitle("Hello   World"), "Hello World");
+    assert.strictEqual(sandbox.cleanTitle("Hello\tWorld"), "Hello World");
+    assert.strictEqual(sandbox.cleanTitle("Hello\nWorld"), "Hello World");
+    assert.strictEqual(sandbox.cleanTitle("Hello \t \n World"), "Hello World");
+  });
+
+  it("should trim leading and trailing whitespaces", () => {
+    assert.strictEqual(sandbox.cleanTitle("  Hello World  "), "Hello World");
+    assert.strictEqual(sandbox.cleanTitle("\tHello World\n"), "Hello World");
+  });
+
+  it("should remove ' - YouTube' suffix", () => {
+    assert.strictEqual(sandbox.cleanTitle("My Video - YouTube"), "My Video");
+    assert.strictEqual(sandbox.cleanTitle("Another Video - YouTube"), "Another Video");
+  });
+
+  it("should not remove ' - YouTube' if it is not at the end", () => {
+    assert.strictEqual(sandbox.cleanTitle("My Video - YouTube tutorial"), "My Video - YouTube tutorial");
+  });
+
+  it("should not remove ' - Youtube' (case sensitive)", () => {
+    assert.strictEqual(sandbox.cleanTitle("My Video - Youtube"), "My Video - Youtube");
+  });
+
+  it("should handle both whitespaces and suffix", () => {
+    assert.strictEqual(sandbox.cleanTitle("  My   Video   - YouTube  "), "My Video");
+    assert.strictEqual(sandbox.cleanTitle("\nMy\tVideo - YouTube\n"), "My Video");
+  });
+
+  it("should return the normal string untouched if no cleaning needed", () => {
+    assert.strictEqual(sandbox.cleanTitle("My Video"), "My Video");
+  });
+});
