@@ -3,7 +3,7 @@ const fs = require("fs");
 const vm = require("vm");
 
 // Read background.js
-const backgroundCode = fs.readFileSync("src/utils/extension.js", "utf8") + "\n" + fs.readFileSync("src/background.js", "utf8");
+const backgroundCode = fs.readFileSync("src/utils/extension.js", "utf8") + "\n" + fs.readFileSync("src/utils/youtube.js", "utf8") + "\n" + fs.readFileSync("src/background.js", "utf8");
 
 // Mock the environment
 const sandbox = {
@@ -40,7 +40,9 @@ const sandbox = {
   JSON: JSON,
   Promise: Promise,
   Object: Object,
-  Boolean: Boolean
+  Boolean: Boolean,
+  URL: URL,
+  URLSearchParams: URLSearchParams
 };
 
 vm.createContext(sandbox);
@@ -79,6 +81,50 @@ describe("normalizeSettingNumber", () => {
     assert.strictEqual(sandbox.normalizeSettingNumber("abc", 10, 1, 20), 10);
     assert.strictEqual(sandbox.normalizeSettingNumber(Infinity, 10, 1, 20), 10);
     assert.strictEqual(sandbox.normalizeSettingNumber(-Infinity, 10, 1, 20), 10);
+  });
+});
+
+describe("extractVideoIdFromUrl", () => {
+  it("should extract video ID from standard /watch?v= URLs", () => {
+    assert.strictEqual(sandbox.extractVideoIdFromUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ"), "dQw4w9WgXcQ");
+    assert.strictEqual(sandbox.extractVideoIdFromUrl("http://youtube.com/watch?v=dQw4w9WgXcQ&feature=youtu.be"), "dQw4w9WgXcQ");
+    assert.strictEqual(sandbox.extractVideoIdFromUrl("https://m.youtube.com/watch?v=dQw4w9WgXcQ"), "dQw4w9WgXcQ");
+  });
+
+  it("should extract video ID from shortened youtu.be/ URLs", () => {
+    assert.strictEqual(sandbox.extractVideoIdFromUrl("https://youtu.be/dQw4w9WgXcQ"), "dQw4w9WgXcQ");
+    assert.strictEqual(sandbox.extractVideoIdFromUrl("http://youtu.be/dQw4w9WgXcQ?t=123"), "dQw4w9WgXcQ");
+  });
+
+  it("should extract video ID from /shorts/ URLs", () => {
+    assert.strictEqual(sandbox.extractVideoIdFromUrl("https://www.youtube.com/shorts/dQw4w9WgXcQ"), "dQw4w9WgXcQ");
+    assert.strictEqual(sandbox.extractVideoIdFromUrl("https://youtube.com/shorts/dQw4w9WgXcQ?feature=share"), "dQw4w9WgXcQ");
+  });
+
+  it("should extract video ID from /embed/ URLs", () => {
+    assert.strictEqual(sandbox.extractVideoIdFromUrl("https://www.youtube.com/embed/dQw4w9WgXcQ"), "dQw4w9WgXcQ");
+  });
+
+  it("should extract video ID from /live/ URLs", () => {
+    assert.strictEqual(sandbox.extractVideoIdFromUrl("https://www.youtube.com/live/dQw4w9WgXcQ"), "dQw4w9WgXcQ");
+  });
+
+  it("should return null for invalid or non-YouTube URLs", () => {
+    assert.strictEqual(sandbox.extractVideoIdFromUrl("https://example.com/watch?v=dQw4w9WgXcQ"), null);
+    assert.strictEqual(sandbox.extractVideoIdFromUrl("not-a-url"), null);
+    assert.strictEqual(sandbox.extractVideoIdFromUrl(null), null);
+    assert.strictEqual(sandbox.extractVideoIdFromUrl(""), null);
+    assert.strictEqual(sandbox.extractVideoIdFromUrl("https://www.youtube.com/"), null);
+    assert.strictEqual(sandbox.extractVideoIdFromUrl("https://www.youtube.com/playlist?list=PLxyz"), null);
+  });
+
+  it("should return null for malformed video IDs", () => {
+    // Too short
+    assert.strictEqual(sandbox.extractVideoIdFromUrl("https://www.youtube.com/watch?v=dQw4w9WgXc"), null);
+    // Too long
+    assert.strictEqual(sandbox.extractVideoIdFromUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ1"), null);
+    // Invalid characters
+    assert.strictEqual(sandbox.extractVideoIdFromUrl("https://www.youtube.com/watch?v=dQw4w9W!XcQ"), null);
   });
 });
 
