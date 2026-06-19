@@ -1262,34 +1262,6 @@ async function forceWorkerWindowBoundsRepeatedly(windowId, bounds) {
   await delay(75);
 }
 
-async function rememberOpenedWorkerWindowBounds(itemId, windowId, requestedBounds) {
-  await delay(1800);
-
-  try {
-    const workerWindow = await extensionApi.windows.get(windowId);
-    const openedBounds = normalizeWorkerBounds({
-      left: workerWindow.left,
-      top: workerWindow.top,
-      width: workerWindow.width,
-      height: workerWindow.height
-    });
-
-    await updateQueueItem(itemId, {}, {
-      event: `window-bounds-opened-${formatBounds(openedBounds)}`,
-      elapsedMs: null
-    });
-
-    if (requestedBounds && openedBounds.left !== requestedBounds.left) {
-      await updateQueueItem(itemId, {}, {
-        event: `window-bounds-clamped-requested-${formatBounds(requestedBounds)}-actual-${formatBounds(openedBounds)}`,
-        elapsedMs: null
-      });
-    }
-  } catch (_error) {
-    // Diagnostic only.
-  }
-}
-
 async function forceWorkerWindowBounds(windowId, bounds) {
   await extensionApi.windows.update(windowId, {
     state: "normal"
