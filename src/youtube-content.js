@@ -521,18 +521,6 @@ function parsePublishDateText(text) {
   return parseExactDateText(normalized) || parseRelativeDateText(normalized);
 }
 
-const NORMALIZE_DATE_MAP = {
-  "\u00a0": " ",
-  "\u015f": "s",
-  "\u0131": "i",
-  "\u011f": "g",
-  "\u00fc": "u",
-  "\u00f6": "o",
-  "\u00e7": "c",
-  ",": " ",
-  "\u2022": " "
-};
-const NORMALIZE_DATE_REGEX = /[\u00a0\u015f\u0131\u011f\u00fc\u00f6\u00e7,\u2022]/g;
 const EXACT_DATE_REGEX_1 = /\b(\d{4})-(\d{1,2})-(\d{1,2})\b/;
 const EXACT_DATE_REGEX_2 = /\b(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})\b/;
 const EXACT_DATE_REGEX_3 = /\b([a-z]+)\s+(\d{1,2})\s+(\d{4})\b/;
@@ -544,11 +532,42 @@ const DATE_SLASH_REGEX = /\d{1,2}[./-]\d{1,2}[./-]\d{2,4}/;
 const DATE_DASH_REGEX = /\b\d{4}-\d{1,2}-\d{1,2}\b/;
 
 function normalizeDateText(text) {
-  return String(text || "")
-    .toLowerCase()
-    .replace(NORMALIZE_DATE_REGEX, (match) => NORMALIZE_DATE_MAP[match])
-    .replace(/\s+/g, " ")
-    .trim();
+  text = String(text || "");
+  if (!text) return "";
+  text = text.toLowerCase();
+
+  let result = "";
+  let lastWasSpace = true;
+  for (let i = 0, len = text.length; i < len; i++) {
+    let char = text[i];
+    let outChar = char;
+    switch (char) {
+      case " ": case "\t": case "\n": case "\r": case "\u00a0": case ",": case "\u2022":
+        outChar = " ";
+        break;
+      case "\u015f": outChar = "s"; break;
+      case "\u0131": outChar = "i"; break;
+      case "\u011f": outChar = "g"; break;
+      case "\u00fc": outChar = "u"; break;
+      case "\u00f6": outChar = "o"; break;
+      case "\u00e7": outChar = "c"; break;
+    }
+
+    if (outChar === " ") {
+      if (!lastWasSpace) {
+        result += " ";
+        lastWasSpace = true;
+      }
+    } else {
+      result += outChar;
+      lastWasSpace = false;
+    }
+  }
+
+  if (lastWasSpace && result.length > 0) {
+    return result.substring(0, result.length - 1);
+  }
+  return result;
 }
 
 function parseExactDateText(text) {
