@@ -313,15 +313,17 @@ async function bulkEnqueueVideos(videos, source, channelUrl) {
   const queue = await getQueue();
   const settings = await getSettings();
   const activeVideoIds = new Set();
+  let activeCount = 0;
   for (let i = 0; i < queue.length; i++) {
     const item = queue[i];
     if (item.status === "pending" || item.status === "running") {
       activeVideoIds.add(item.videoId);
+      activeCount += 1;
     }
   }
   const createdItems = [];
   const seenInputIds = new Set();
-  let availableSlots = Math.max(0, settings.maxQueueSize - getActiveQueueCount(queue));
+  let availableSlots = Math.max(0, settings.maxQueueSize - activeCount);
   let duplicate = 0;
   let skipped = 0;
   let errors = 0;
@@ -371,7 +373,14 @@ async function bulkEnqueueVideos(videos, source, channelUrl) {
 }
 
 function getActiveQueueCount(queue) {
-  return queue.filter((item) => ["pending", "running"].includes(item.status)).length;
+  let count = 0;
+  for (let i = 0; i < queue.length; i++) {
+    const status = queue[i].status;
+    if (status === "pending" || status === "running") {
+      count += 1;
+    }
+  }
+  return count;
 }
 
 async function clearQueue() {
