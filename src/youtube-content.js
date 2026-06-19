@@ -684,26 +684,26 @@ function isVideoUrl(url) {
   );
 }
 
+const VIDEO_URL_SELECTORS = [
+  "a#thumbnail[href]",
+  "a#video-title[href]",
+  "a#video-title-link[href]",
+  "a.yt-lockup-metadata-view-model__title[href]",
+  "a.yt-simple-endpoint[href]",
+  "a[href*='watch?v=']",
+  "a[href*='/watch?v=']",
+  "a[href^='/shorts/']",
+  "a[href*='/shorts/']",
+  "a[href^='/live/']",
+  "a[href*='/live/']"
+];
+
 function findVideoUrlInContainer(container) {
   if (!container) {
     return null;
   }
 
-  const selectors = [
-    "a#thumbnail[href]",
-    "a#video-title[href]",
-    "a#video-title-link[href]",
-    "a.yt-lockup-metadata-view-model__title[href]",
-    "a.yt-simple-endpoint[href]",
-    "a[href*='watch?v=']",
-    "a[href*='/watch?v=']",
-    "a[href^='/shorts/']",
-    "a[href*='/shorts/']",
-    "a[href^='/live/']",
-    "a[href*='/live/']"
-  ];
-
-  for (const selector of selectors) {
+  for (const selector of VIDEO_URL_SELECTORS) {
     const link = container.querySelector(selector);
     const url = absoluteUrl(link && link.getAttribute("href"));
 
