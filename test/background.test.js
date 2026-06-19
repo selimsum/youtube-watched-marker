@@ -108,6 +108,47 @@ describe("normalizeSettingNumber", () => {
   });
 });
 
+describe("cleanVideoId", () => {
+  it("should return the video ID for valid 11-character strings", () => {
+    assert.strictEqual(sandbox.cleanVideoId("dQw4w9WgXcQ"), "dQw4w9WgXcQ");
+    assert.strictEqual(sandbox.cleanVideoId("12345678901"), "12345678901");
+    assert.strictEqual(sandbox.cleanVideoId("aBcDeFgHiJk"), "aBcDeFgHiJk");
+    assert.strictEqual(sandbox.cleanVideoId("-_abc123DEF"), "-_abc123DEF");
+  });
+
+  it("should trim leading and trailing whitespace", () => {
+    assert.strictEqual(sandbox.cleanVideoId(" dQw4w9WgXcQ "), "dQw4w9WgXcQ");
+    assert.strictEqual(sandbox.cleanVideoId("\tdQw4w9WgXcQ\n"), "dQw4w9WgXcQ");
+  });
+
+  it("should return null for invalid lengths", () => {
+    assert.strictEqual(sandbox.cleanVideoId("dQw4w9WgXc"), null); // 10 chars
+    assert.strictEqual(sandbox.cleanVideoId("dQw4w9WgXcQ1"), null); // 12 chars
+  });
+
+  it("should return null for invalid characters", () => {
+    assert.strictEqual(sandbox.cleanVideoId("dQw4w9W!XcQ"), null);
+    assert.strictEqual(sandbox.cleanVideoId("dQw4w9WgXc#"), null);
+    assert.strictEqual(sandbox.cleanVideoId("dQw4w9WgXc "), null);
+  });
+
+  it("should return null for falsy values", () => {
+    assert.strictEqual(sandbox.cleanVideoId(null), null);
+    assert.strictEqual(sandbox.cleanVideoId(undefined), null);
+    assert.strictEqual(sandbox.cleanVideoId(""), null);
+    assert.strictEqual(sandbox.cleanVideoId(0), null);
+    assert.strictEqual(sandbox.cleanVideoId(false), null);
+  });
+
+  it("should handle non-string types gracefully", () => {
+    // Note: The function converts the value to a string first with String(value).
+    // The number 12345678901 becomes "12345678901" which matches the 11 character length regex constraint
+    assert.strictEqual(sandbox.cleanVideoId(12345678901), "12345678901");
+    assert.strictEqual(sandbox.cleanVideoId({}), null);
+    assert.strictEqual(sandbox.cleanVideoId([]), null);
+  });
+});
+
 describe("extractVideoIdFromUrl", () => {
   it("should extract video ID from standard /watch?v= URLs", () => {
     assert.strictEqual(sandbox.extractVideoIdFromUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ"), "dQw4w9WgXcQ");
