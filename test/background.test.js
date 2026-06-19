@@ -48,6 +48,30 @@ const sandbox = {
 vm.createContext(sandbox);
 vm.runInContext(backgroundCode, sandbox);
 
+describe("normalizeUrl", () => {
+  it("should return a URL object for valid URL strings", () => {
+    const urlStr = "https://example.com/path?query=1";
+    const result = sandbox.normalizeUrl(urlStr);
+    assert.strictEqual(result instanceof URL, true);
+    assert.strictEqual(result.href, urlStr);
+  });
+
+  it("should return null for invalid URL strings", () => {
+    assert.strictEqual(sandbox.normalizeUrl("not-a-url"), null);
+    assert.strictEqual(sandbox.normalizeUrl("http://"), null);
+    assert.strictEqual(sandbox.normalizeUrl(""), null);
+  });
+
+  it("should return null for non-string inputs", () => {
+    assert.strictEqual(sandbox.normalizeUrl(null), null);
+    assert.strictEqual(sandbox.normalizeUrl(undefined), null);
+    assert.strictEqual(sandbox.normalizeUrl(123), null);
+    assert.strictEqual(sandbox.normalizeUrl(true), null);
+    assert.strictEqual(sandbox.normalizeUrl({}), null);
+    assert.strictEqual(sandbox.normalizeUrl([]), null);
+  });
+});
+
 describe("normalizeSettingNumber", () => {
   it("should return the number when it's within bounds", () => {
     assert.strictEqual(sandbox.normalizeSettingNumber(5, 10, 1, 20), 5);
