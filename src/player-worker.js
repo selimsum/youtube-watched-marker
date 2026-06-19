@@ -11,6 +11,13 @@
   let activeRun = false;
   let runStartedAt = 0;
 
+  const SKIP_BUTTON_SELECTOR = [
+    ".ytp-ad-skip-button-modern",
+    ".ytp-ad-skip-button",
+    ".ytp-skip-ad-button",
+    ".ytp-ad-overlay-close-button"
+  ].join(",");
+
   function waitForEvent(target, eventName, timeoutMs) {
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
@@ -210,12 +217,7 @@
     const startedAt = Date.now();
 
     while (Date.now() - startedAt < timeoutMs && isAdShowing()) {
-      const skipButton = document.querySelector([
-        ".ytp-ad-skip-button-modern",
-        ".ytp-ad-skip-button",
-        ".ytp-skip-ad-button",
-        ".ytp-ad-overlay-close-button"
-      ].join(","));
+      const skipButton = document.querySelector(SKIP_BUTTON_SELECTOR);
 
       if (skipButton) {
         clickElement(skipButton);
