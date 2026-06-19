@@ -439,10 +439,10 @@ function looksLikePublishDateText(text) {
   return Boolean(
     normalized &&
     (
-      /\bago\b/.test(normalized) ||
-      /\bonce\b/.test(normalized) ||
-      /\d{1,2}[./-]\d{1,2}[./-]\d{2,4}/.test(normalized) ||
-      /\b\d{4}-\d{1,2}-\d{1,2}\b/.test(normalized) ||
+      AGO_REGEX.test(normalized) ||
+      ONCE_REGEX.test(normalized) ||
+      DATE_SLASH_REGEX.test(normalized) ||
+      DATE_DASH_REGEX.test(normalized) ||
       Object.keys(MONTHS).some((monthName) => normalized.includes(monthName))
     )
   );
@@ -458,42 +458,57 @@ function parsePublishDateText(text) {
   return parseExactDateText(normalized) || parseRelativeDateText(normalized);
 }
 
+const NORMALIZE_DATE_MAP = {
+  "\u00a0": " ",
+  "\u015f": "s",
+  "\u0131": "i",
+  "\u011f": "g",
+  "\u00fc": "u",
+  "\u00f6": "o",
+  "\u00e7": "c",
+  ",": " ",
+  "\u2022": " "
+};
+const NORMALIZE_DATE_REGEX = /[\u00a0\u015f\u0131\u011f\u00fc\u00f6\u00e7,\u2022]/g;
+const EXACT_DATE_REGEX_1 = /\b(\d{4})-(\d{1,2})-(\d{1,2})\b/;
+const EXACT_DATE_REGEX_2 = /\b(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})\b/;
+const EXACT_DATE_REGEX_3 = /\b([a-z]+)\s+(\d{1,2})\s+(\d{4})\b/;
+const EXACT_DATE_REGEX_4 = /\b(\d{1,2})\s+([a-z]+)\s+(\d{4})\b/;
+const RELATIVE_DATE_REGEX = /\b(\d+)\s*(second|seconds|minute|minutes|hour|hours|day|days|week|weeks|month|months|year|years|saniye|saat|gun|hafta|ay|yil)\b/;
+const AGO_REGEX = /\bago\b/;
+const ONCE_REGEX = /\bonce\b/;
+const DATE_SLASH_REGEX = /\d{1,2}[./-]\d{1,2}[./-]\d{2,4}/;
+const DATE_DASH_REGEX = /\b\d{4}-\d{1,2}-\d{1,2}\b/;
+
 function normalizeDateText(text) {
   return String(text || "")
     .toLowerCase()
-    .replace(/\u00a0/g, " ")
-    .replace(/\u015f/g, "s")
-    .replace(/\u0131/g, "i")
-    .replace(/\u011f/g, "g")
-    .replace(/\u00fc/g, "u")
-    .replace(/\u00f6/g, "o")
-    .replace(/\u00e7/g, "c")
-    .replace(/[,\u2022]/g, " ")
+    .replace(NORMALIZE_DATE_REGEX, (match) => NORMALIZE_DATE_MAP[match])
     .replace(/\s+/g, " ")
     .trim();
 }
 
 function parseExactDateText(text) {
-  let match = text.match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/);
+  let match = EXACT_DATE_REGEX_1.exec(text);
 
   if (match) {
     return makeExactDate(Number(match[1]), Number(match[2]), Number(match[3]));
   }
 
-  match = text.match(/\b(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})\b/);
+  match = EXACT_DATE_REGEX_2.exec(text);
 
   if (match) {
     const year = Number(match[3].length === 2 ? `20${match[3]}` : match[3]);
     return makeExactDate(year, Number(match[2]), Number(match[1]));
   }
 
-  match = text.match(/\b([a-z]+)\s+(\d{1,2})\s+(\d{4})\b/);
+  match = EXACT_DATE_REGEX_3.exec(text);
 
   if (match && Object.prototype.hasOwnProperty.call(MONTHS, match[1])) {
     return makeExactDate(Number(match[3]), MONTHS[match[1]] + 1, Number(match[2]));
   }
 
-  match = text.match(/\b(\d{1,2})\s+([a-z]+)\s+(\d{4})\b/);
+  match = EXACT_DATE_REGEX_4.exec(text);
 
   if (match && Object.prototype.hasOwnProperty.call(MONTHS, match[2])) {
     return makeExactDate(Number(match[3]), MONTHS[match[2]] + 1, Number(match[1]));
@@ -520,7 +535,7 @@ function makeExactDate(year, month, day) {
 }
 
 function parseRelativeDateText(text) {
-  const match = text.match(/\b(\d+)\s*(second|seconds|minute|minutes|hour|hours|day|days|week|weeks|month|months|year|years|saniye|saat|gun|hafta|ay|yil)\b/);
+  const match = RELATIVE_DATE_REGEX.exec(text);
 
   if (!match || (!text.includes("ago") && !text.includes("once"))) {
     return null;
