@@ -106,3 +106,42 @@ describe("parseRgbColor", () => {
     assert.strictEqual(sandbox.parseRgbColor(123), null);
   });
 });
+
+describe("isChannelVideosPage", () => {
+  it("should match @ChannelName/videos paths", () => {
+    sandbox.window.location.pathname = "/@MKBHD/videos";
+    assert.strictEqual(sandbox.isChannelVideosPage(), true);
+  });
+
+  it("should match /c/ChannelName/videos paths", () => {
+    sandbox.window.location.pathname = "/c/LinusTechTips/videos";
+    assert.strictEqual(sandbox.isChannelVideosPage(), true);
+  });
+
+  it("should match /channel/ChannelId/videos paths", () => {
+    sandbox.window.location.pathname = "/channel/UC-lHJZR3Gqxm24_Vd_AJ5Yw/videos";
+    assert.strictEqual(sandbox.isChannelVideosPage(), true);
+  });
+
+  it("should match /user/UserName/videos paths", () => {
+    sandbox.window.location.pathname = "/user/mkbhd/videos";
+    assert.strictEqual(sandbox.isChannelVideosPage(), true);
+  });
+
+  it("should return false for non-matching paths", () => {
+    sandbox.window.location.pathname = "/watch?v=dQw4w9WgXcQ";
+    assert.strictEqual(sandbox.isChannelVideosPage(), false);
+
+    sandbox.window.location.pathname = "/@MKBHD/about";
+    assert.strictEqual(sandbox.isChannelVideosPage(), false);
+
+    sandbox.window.location.pathname = "/c/LinusTechTips";
+    assert.strictEqual(sandbox.isChannelVideosPage(), false);
+
+    sandbox.window.location.pathname = "/";
+    assert.strictEqual(sandbox.isChannelVideosPage(), false);
+
+    sandbox.window.location.pathname = "";
+    assert.strictEqual(sandbox.isChannelVideosPage(), false);
+  });
+});
