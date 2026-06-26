@@ -310,17 +310,15 @@ function getPublishTextCandidates(container) {
     "[title]"
   ];
 
-  for (const selector of selectors) {
-    for (const element of container.querySelectorAll(selector)) {
-      const text = [
-        element.getAttribute("aria-label"),
-        element.getAttribute("title"),
-        element.textContent
-      ].filter(Boolean).join(" ");
+  for (const element of container.querySelectorAll(selectors.join(","))) {
+    const text = [
+      element.getAttribute("aria-label"),
+      element.getAttribute("title"),
+      element.textContent
+    ].filter(Boolean).join(" ");
 
-      if (looksLikePublishDateText(text)) {
-        candidates.push(text);
-      }
+    if (looksLikePublishDateText(text)) {
+      candidates.push(text);
     }
   }
 
