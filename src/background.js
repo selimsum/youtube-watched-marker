@@ -1040,13 +1040,11 @@ async function getWorkerWindowBounds() {
 }
 
 function normalizeWindowPosition(value, fallback) {
-  const numberValue = Number(value);
-
-  if (!Number.isFinite(numberValue)) {
+  if (typeof value !== "number" || !Number.isFinite(value) || isNaN(value)) {
     return fallback;
   }
 
-  return Math.round(numberValue);
+  return Math.round(value);
 }
 
 function normalizeWorkerWindowSize(value, fallback) {

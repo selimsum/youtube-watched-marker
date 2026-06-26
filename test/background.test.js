@@ -263,3 +263,35 @@ describe("normalizeUrl", () => {
     assert.strictEqual(sandbox.normalizeUrl(""), null);
   });
 });
+
+describe("normalizeWindowPosition", () => {
+  it("should return rounded number for valid numerical values", () => {
+    assert.strictEqual(sandbox.normalizeWindowPosition(100, 50), 100);
+    assert.strictEqual(sandbox.normalizeWindowPosition(100.4, 50), 100);
+    assert.strictEqual(sandbox.normalizeWindowPosition(100.5, 50), 101);
+    assert.strictEqual(sandbox.normalizeWindowPosition(-100.5, 50), -100);
+    assert.strictEqual(sandbox.normalizeWindowPosition(-100.6, 50), -101);
+    assert.strictEqual(sandbox.normalizeWindowPosition(0, 50), 0);
+  });
+
+  it("should return fallback for string numbers", () => {
+    assert.strictEqual(sandbox.normalizeWindowPosition("100", 50), 50);
+    assert.strictEqual(sandbox.normalizeWindowPosition("100.5", 50), 50);
+    assert.strictEqual(sandbox.normalizeWindowPosition("-100.6", 50), 50);
+  });
+
+  it("should return fallback for non-finite values", () => {
+    assert.strictEqual(sandbox.normalizeWindowPosition(NaN, 50), 50);
+    assert.strictEqual(sandbox.normalizeWindowPosition(Infinity, 50), 50);
+    assert.strictEqual(sandbox.normalizeWindowPosition(-Infinity, 50), 50);
+  });
+
+  it("should return fallback for invalid types", () => {
+    assert.strictEqual(sandbox.normalizeWindowPosition(undefined, 50), 50);
+    assert.strictEqual(sandbox.normalizeWindowPosition("abc", 50), 50);
+    assert.strictEqual(sandbox.normalizeWindowPosition({}, 50), 50);
+    assert.strictEqual(sandbox.normalizeWindowPosition([], 50), 50);
+    assert.strictEqual(sandbox.normalizeWindowPosition([1, 2], 50), 50);
+    assert.strictEqual(sandbox.normalizeWindowPosition(null, 50), 50);
+  });
+});
