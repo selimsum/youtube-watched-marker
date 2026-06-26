@@ -20,21 +20,13 @@
 
   function waitForEvent(target, eventName, timeoutMs) {
     return new Promise((resolve, reject) => {
-      const timeoutId = setTimeout(() => {
-        cleanup();
-        reject(new Error(`${eventName}-timeout`));
-      }, timeoutMs);
-
-      function cleanup() {
+      const finish = (error) => {
         clearTimeout(timeoutId);
         target.removeEventListener(eventName, onEvent);
-      }
-
-      function onEvent() {
-        cleanup();
-        resolve();
-      }
-
+        error ? reject(error) : resolve();
+      };
+      const onEvent = () => finish();
+      const timeoutId = setTimeout(() => finish(new Error(`${eventName}-timeout`)), timeoutMs);
       target.addEventListener(eventName, onEvent, { once: true });
     });
   }
