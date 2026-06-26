@@ -263,3 +263,52 @@ describe("normalizeUrl", () => {
     assert.strictEqual(sandbox.normalizeUrl(""), null);
   });
 });
+
+describe("closeTabQuietly", () => {
+  let originalTabsRemove;
+
+  beforeEach(() => {
+    sandbox.throwError = false;
+    sandbox.removeCalledWith = null;
+
+    // Ensure extensionApi and extensionApi.tabs are initialized
+    if (!sandbox.extensionApi) sandbox.extensionApi = {};
+    if (!sandbox.extensionApi.tabs) sandbox.extensionApi.tabs = {};
+
+    originalTabsRemove = sandbox.extensionApi.tabs.remove;
+
+    vm.runInContext(`
+      if (typeof extensionApi === 'undefined') {
+        globalThis.extensionApi = { tabs: {} };
+      } else if (!extensionApi.tabs) {
+        extensionApi.tabs = {};
+      }
+
+      extensionApi.tabs.remove = async (tabId) => {
+        globalThis.removeCalledWith = tabId;
+        if (globalThis.throwError) {
+          throw new Error("Tab already closed");
+        }
+      };
+    `, sandbox);
+  });
+
+  afterEach(() => {
+    if (sandbox.extensionApi && sandbox.extensionApi.tabs) {
+      sandbox.extensionApi.tabs.remove = originalTabsRemove;
+    }
+  });
+
+  it("should call extensionApi.tabs.remove with correct tabId", async () => {
+    await sandbox.closeTabQuietly(123);
+    assert.strictEqual(sandbox.removeCalledWith, 123);
+  });
+
+  it("should catch errors thrown by extensionApi.tabs.remove", async () => {
+    sandbox.throwError = true;
+
+    // Should not throw
+    await sandbox.closeTabQuietly(456);
+    assert.strictEqual(sandbox.removeCalledWith, 456);
+  });
+});
