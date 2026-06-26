@@ -92,3 +92,28 @@ describe("formatDate", () => {
     assert.strictEqual(result, expected);
   });
 });
+
+describe("isOldestDateShortcut", () => {
+  it("should return true for valid shortcuts", () => {
+    assert.strictEqual(sandbox.isOldestDateShortcut("oldest"), true);
+    assert.strictEqual(sandbox.isOldestDateShortcut("end"), true);
+  });
+
+  it("should handle mixed case and whitespace", () => {
+    assert.strictEqual(sandbox.isOldestDateShortcut(" OLDEST "), true);
+    assert.strictEqual(sandbox.isOldestDateShortcut("End"), true);
+    assert.strictEqual(sandbox.isOldestDateShortcut("   end   "), true);
+  });
+
+  it("should return false for invalid strings", () => {
+    assert.strictEqual(sandbox.isOldestDateShortcut("0"), false);
+    assert.strictEqual(sandbox.isOldestDateShortcut("invalid"), false);
+    assert.strictEqual(sandbox.isOldestDateShortcut(""), false);
+    assert.strictEqual(sandbox.isOldestDateShortcut("   "), false);
+  });
+
+  it("should return false for null and undefined", () => {
+    assert.strictEqual(sandbox.isOldestDateShortcut(null), false);
+    assert.strictEqual(sandbox.isOldestDateShortcut(undefined), false);
+  });
+});
