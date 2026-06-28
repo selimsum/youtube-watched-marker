@@ -1373,18 +1373,15 @@ function hasUsableMenuTarget() {
 }
 
 function scanMenus(root) {
-  const menus = [];
-
   if (root.nodeType === Node.ELEMENT_NODE && root.matches(MENU_POPUP_SELECTOR)) {
-    menus.push(root);
+    injectIntoMenu(root);
   }
 
   if (root.querySelectorAll) {
-    menus.push(...root.querySelectorAll(MENU_POPUP_SELECTOR));
-  }
-
-  for (const menu of menus) {
-    injectIntoMenu(menu);
+    const menus = root.querySelectorAll(MENU_POPUP_SELECTOR);
+    for (const menu of menus) {
+      injectIntoMenu(menu);
+    }
   }
 }
 
