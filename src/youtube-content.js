@@ -17,6 +17,17 @@ const CHANNEL_SCAN_STABLE_SCROLLS = 4;
 const CHANNEL_SCAN_RECENT_OLDER_COUNT = 8;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+const CONTAINER_CACHE = new WeakMap();
+
+function getContainerCache(container) {
+  let cache = CONTAINER_CACHE.get(container);
+  if (!cache) {
+    cache = {};
+    CONTAINER_CACHE.set(container, cache);
+  }
+  return cache;
+}
+
 const VIDEO_CONTAINER_SELECTOR = [
   "ytd-rich-item-renderer",
   "ytd-rich-grid-media",
@@ -300,6 +311,11 @@ function getPublishTextCandidates(container) {
     return [];
   }
 
+  const cache = getContainerCache(container);
+  if (cache.dateCandidates !== undefined) {
+    return cache.dateCandidates;
+  }
+
   const candidates = [];
   const selectors = [
     "#metadata-line span",
@@ -326,6 +342,7 @@ function getPublishTextCandidates(container) {
     candidates.push(container.textContent);
   }
 
+  cache.dateCandidates = candidates;
   return candidates;
 }
 
@@ -701,15 +718,22 @@ function findVideoUrlInContainer(container) {
     return null;
   }
 
+  const cache = getContainerCache(container);
+  if (cache.url !== undefined) {
+    return cache.url;
+  }
+
   for (const selector of VIDEO_URL_SELECTORS) {
     const link = container.querySelector(selector);
     const url = absoluteUrl(link && link.getAttribute("href"));
 
     if (isVideoUrl(url)) {
+      cache.url = url;
       return url;
     }
   }
 
+  cache.url = null;
   return null;
 }
 
@@ -746,6 +770,11 @@ function findVideoTitleInContainer(container) {
     return "";
   }
 
+  const cache = getContainerCache(container);
+  if (cache.title !== undefined) {
+    return cache.title;
+  }
+
   const selectors = [
     "a#video-title",
     "a#video-title-link",
@@ -759,13 +788,16 @@ function findVideoTitleInContainer(container) {
   ];
 
   for (const selector of selectors) {
-    const title = getElementTitle(container.querySelector(selector));
+    const element = container.querySelector(selector);
+    const text = getElementTitle(element);
 
-    if (title) {
-      return title;
+    if (text) {
+      cache.title = text;
+      return text;
     }
   }
 
+  cache.title = "";
   return "";
 }
 
