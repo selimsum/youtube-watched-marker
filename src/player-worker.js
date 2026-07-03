@@ -250,7 +250,7 @@
         type: "focus-worker-tab"
       });
       return true;
-    } catch (_error) {
+    } catch {
       return false;
     }
   }
@@ -349,7 +349,7 @@
       await extensionApi.runtime.sendMessage({
         type: "release-worker-tab"
       });
-    } catch (_error) {
+    } catch {
       // The worker tab may be closing.
     }
   }
@@ -360,7 +360,7 @@
         video.pause();
         video.autoplay = false;
         video.removeAttribute("autoplay");
-      } catch (_error) {
+      } catch {
         // Best effort cleanup before the worker tab closes.
       }
     }
@@ -378,7 +378,7 @@
         status,
         elapsedMs: runStartedAt ? Date.now() - runStartedAt : null
       });
-    } catch (_error) {
+    } catch {
       // Status messages are diagnostic only.
     }
   }
