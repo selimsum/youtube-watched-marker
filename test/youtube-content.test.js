@@ -145,3 +145,33 @@ describe("isChannelVideosPage", () => {
     assert.strictEqual(sandbox.isChannelVideosPage(), false);
   });
 });
+
+describe("normalizeDateText", () => {
+  it("should return empty string for empty, null, or undefined inputs", () => {
+    assert.strictEqual(sandbox.normalizeDateText(""), "");
+    assert.strictEqual(sandbox.normalizeDateText(null), "");
+    assert.strictEqual(sandbox.normalizeDateText(undefined), "");
+  });
+
+  it("should coerce non-string inputs to string", () => {
+    assert.strictEqual(sandbox.normalizeDateText(123), "123");
+    assert.strictEqual(sandbox.normalizeDateText(true), "true");
+  });
+
+  it("should lowercase all text", () => {
+    assert.strictEqual(sandbox.normalizeDateText("OCTOBER 15"), "october 15");
+    assert.strictEqual(sandbox.normalizeDateText("JanUary"), "january");
+  });
+
+  it("should replace whitespace, tabs, newlines, commas, and bullets with spaces and deduplicate them", () => {
+    assert.strictEqual(sandbox.normalizeDateText("  May  12  "), "may 12");
+    assert.strictEqual(sandbox.normalizeDateText("May\t12\n2022"), "may 12 2022");
+    assert.strictEqual(sandbox.normalizeDateText("May 12, 2022 \u2022"), "may 12 2022");
+    assert.strictEqual(sandbox.normalizeDateText("\u00a0Jan\u00a01\u00a0"), "jan 1");
+  });
+
+  it("should replace specific Turkish characters with standard English letters", () => {
+    assert.strictEqual(sandbox.normalizeDateText("\u015f\u0131\u011f\u00fc\u00f6\u00e7"), "siguoc");
+    assert.strictEqual(sandbox.normalizeDateText("MAYI\u015e"), "mayis");
+  });
+});
