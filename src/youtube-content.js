@@ -367,7 +367,7 @@ function getPageInitialDataValues() {
     if (window.wrappedJSObject && window.wrappedJSObject.ytInitialData) {
       values.push(window.wrappedJSObject.ytInitialData);
     }
-  } catch (_error) {
+  } catch {
     // Firefox may block direct access depending on the page object shape.
   }
 
@@ -399,7 +399,7 @@ function getInitialDataFromScripts() {
 
     try {
       return JSON.parse(text.slice(jsonStart, jsonEnd + 1));
-    } catch (_error) {
+    } catch {
       // Try the next script if YouTube™ changes this wrapper.
     }
   }
@@ -683,7 +683,7 @@ function absoluteUrl(value) {
 
   try {
     return new URL(value, window.location.origin).toString();
-  } catch (_error) {
+  } catch {
     return null;
   }
 }
@@ -905,7 +905,7 @@ function getVideoIdFromUrl(rawUrl) {
     if (["shorts", "embed", "live"].includes(parts[0])) {
       return parts[1] || null;
     }
-  } catch (_error) {}
+  } catch {}
 
   return null;
 }
@@ -930,7 +930,7 @@ function openWorkerWindow(workerUrl) {
 
   try {
     return window.open(workerUrl, `ytwm-worker-${Date.now()}`, WORKER_WINDOW_FEATURES);
-  } catch (_error) {
+  } catch {
     return null;
   }
 }
