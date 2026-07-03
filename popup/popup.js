@@ -134,7 +134,7 @@ function getChannelVideosUrl(rawUrl) {
 
   try {
     url = new URL(rawUrl);
-  } catch (_error) {
+  } catch {
     return null;
   }
 
