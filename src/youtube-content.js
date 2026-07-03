@@ -60,6 +60,8 @@ const VIDEO_CONTAINERS_SELECTOR = [
 
 const WORKER_WINDOW_FEATURES = [
   "popup=yes",
+  "noopener",
+  "noreferrer",
   `left=${WORKER_WINDOW_BOUNDS.left}`,
   `top=${WORKER_WINDOW_BOUNDS.top}`,
   `width=${WORKER_WINDOW_BOUNDS.width}`,
