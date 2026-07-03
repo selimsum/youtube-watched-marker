@@ -201,15 +201,16 @@
   }
 
   async function handleAdIfPresent(itemId, timeoutMs) {
-    if (!isAdShowing()) {
+    const player = getPlayerElement();
+    if (!player || !player.classList.contains("ad-showing")) {
       return;
     }
 
     await reportStatus(itemId, "ad-showing");
     const startedAt = Date.now();
 
-    while (Date.now() - startedAt < timeoutMs && isAdShowing()) {
-      const skipButton = document.querySelector(SKIP_BUTTON_SELECTOR);
+    while (Date.now() - startedAt < timeoutMs && player.classList.contains("ad-showing")) {
+      const skipButton = player.querySelector(SKIP_BUTTON_SELECTOR);
 
       if (skipButton) {
         clickElement(skipButton);
@@ -219,7 +220,7 @@
       await delay(1000);
     }
 
-    if (isAdShowing()) {
+    if (player.classList.contains("ad-showing")) {
       await reportStatus(itemId, "ad-still-showing");
     }
   }

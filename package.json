@@ -13,5 +13,8 @@
   "devDependencies": {
     "mocha": "^11.7.6",
     "web-ext": "^8.9.0"
+  },
+  "dependencies": {
+    "jsdom": "^29.1.1"
   }
 }
