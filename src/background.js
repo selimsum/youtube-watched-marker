@@ -49,7 +49,7 @@ function normalizeUrl(value) {
 
   try {
     return new URL(value);
-  } catch (_error) {
+  } catch {
     return null;
   }
 }
@@ -540,7 +540,7 @@ async function retainWorkerForNextItem(worker) {
       muted: true
     }).catch(() => {});
     return true;
-  } catch (_error) {
+  } catch {
     retainedWorker = null;
     return false;
   }
@@ -571,7 +571,7 @@ async function useRetainedWorkerWindow(url) {
       requestedBounds: worker.requestedBounds,
       reused: true
     };
-  } catch (_error) {
+  } catch {
     await closeWorkerQuietly(worker);
     return null;
   }
@@ -970,7 +970,7 @@ function withTimeout(promise, timeoutMs, errorMessage) {
 async function closeTabQuietly(tabId) {
   try {
     await extensionApi.tabs.remove(tabId);
-  } catch (_error) {
+  } catch {
     // The tab may already be gone.
   }
 }
@@ -990,7 +990,7 @@ async function closeWorkerQuietly(worker) {
     try {
       await extensionApi.windows.remove(worker.windowId);
       return;
-    } catch (_error) {
+    } catch {
       // Fall back to tab removal below when the window is already gone.
     }
   }
@@ -1005,16 +1005,16 @@ async function stopWorkerPlaybackQuietly(tabId) {
     await extensionApi.tabs.sendMessage(tabId, {
       type: "stop-watch-simulation"
     });
-  } catch (_error) {
+  } catch {
     // The worker content script may not be loaded or may already be gone.
   }
 
   try {
     await extensionApi.tabs.executeScript(tabId, {
-      code: "for (const video of document.querySelectorAll('video')) { try { video.pause(); video.currentTime = video.currentTime; } catch (_error) {} }",
+      code: "for (const video of document.querySelectorAll('video')) { try { video.pause(); video.currentTime = video.currentTime; } catch {} }",
       runAt: "document_idle"
     });
-  } catch (_error) {
+  } catch {
     // The tab may be closing or no longer scriptable.
   }
 }
@@ -1086,7 +1086,7 @@ async function rememberWorkerWindowBounds(worker) {
       event: `window-bounds-saved-${formatBounds(safeBounds)}`,
       elapsedMs: null
     }).catch(() => {});
-  } catch (_error) {
+  } catch {
     // The worker window may already be closed.
   }
 }
@@ -1247,7 +1247,7 @@ function urlsMatchIgnoringEncoding(actualUrl, expectedUrl) {
     const actual = new URL(actualUrl);
     const expected = new URL(expectedUrl);
     return actual.href === expected.href;
-  } catch (_error) {
+  } catch {
     return false;
   }
 }
