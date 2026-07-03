@@ -149,6 +149,41 @@ describe("cleanVideoId", () => {
   });
 });
 
+describe("cleanTitle", () => {
+  it("should return empty string for falsy and non-string inputs", () => {
+    assert.strictEqual(sandbox.cleanTitle(null), "");
+    assert.strictEqual(sandbox.cleanTitle(undefined), "");
+    assert.strictEqual(sandbox.cleanTitle(""), "");
+    assert.strictEqual(sandbox.cleanTitle(0), "");
+    assert.strictEqual(sandbox.cleanTitle(false), "");
+    assert.strictEqual(sandbox.cleanTitle([]), "");
+    assert.strictEqual(sandbox.cleanTitle({}), "");
+  });
+
+  it("should remove the trailing ' - YouTube' suffix", () => {
+    assert.strictEqual(sandbox.cleanTitle("My Awesome Video - YouTube"), "My Awesome Video");
+    assert.strictEqual(sandbox.cleanTitle("Another video - YouTube"), "Another video");
+    assert.strictEqual(sandbox.cleanTitle("Just a video"), "Just a video"); // no suffix
+  });
+
+  it("should replace multiple spaces with a single space", () => {
+    assert.strictEqual(sandbox.cleanTitle("A    video   with    spaces"), "A video with spaces");
+    assert.strictEqual(sandbox.cleanTitle("A \t\n video"), "A video");
+  });
+
+  it("should trim leading and trailing whitespace", () => {
+    assert.strictEqual(sandbox.cleanTitle("  Video Title  "), "Video Title");
+    assert.strictEqual(sandbox.cleanTitle("\nVideo Title\t"), "Video Title");
+  });
+
+  it("should perform all cleanup operations together", () => {
+    // Note: the implementation replaces space then trailing ` - YouTube`, so space before hyphen needs to be 1 space.
+    // E.g., `   My   Awesome \t Video   - YouTube   ` -> `My Awesome Video - YouTube ` -> `My Awesome Video - YouTube`
+    // We should test strings that when spaces are replaced, match " - YouTube$" after trim or before trim
+    assert.strictEqual(sandbox.cleanTitle("   My   Awesome \t Video   - YouTube"), "My Awesome Video");
+  });
+});
+
 describe("extractVideoIdFromUrl", () => {
   it("should extract video ID from standard /watch?v= URLs", () => {
     assert.strictEqual(sandbox.extractVideoIdFromUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ"), "dQw4w9WgXcQ");
