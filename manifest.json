@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "YouTube™ Watched Marker",
-  "version": "0.1.26",
+  "version": "0.1.27",
   "description": "Queues YouTube™ videos and briefly plays them in a worker window to simulate watched playback.",
   "homepage_url": "https://github.com/selimsum/youtube-watched-marker",
   "permissions": [
@@ -22,6 +22,16 @@
     "persistent": true
   },
   "content_scripts": [
+    {
+      "matches": [
+        "*://www.youtube.com/*",
+        "*://m.youtube.com/*"
+      ],
+      "js": [
+        "src/youtube-seed.js"
+      ],
+      "run_at": "document_start"
+    },
     {
       "matches": [
         "*://www.youtube.com/*",

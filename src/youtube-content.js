@@ -1,11 +1,9 @@
 "use strict";
 
-const MENU_ITEM_CLASS = "youtube-watched-marker-menu-item";
-const MENU_ITEM_SELECTOR = `.${MENU_ITEM_CLASS}`;
-const LIGHT_MENU_BACKGROUND = "rgb(255, 255, 255)";
-const DARK_MENU_BACKGROUND = "rgb(40, 40, 40)";
-const LIGHT_MENU_TEXT = "rgb(15, 15, 15)";
-const DARK_MENU_TEXT = "rgb(241, 241, 241)";
+const style = document.createElement("style");
+style.textContent = "ytd-menu-popup-renderer,tp-yt-paper-listbox{scrollbar-width:none!important;-ms-overflow-style:none!important}";
+document.documentElement.appendChild(style);
+
 const WORKER_WINDOW_BOUNDS = {
   left: 2176,
   top: 144,
@@ -16,6 +14,8 @@ const CHANNEL_SCAN_MAX_SCROLLS = 120;
 const CHANNEL_SCAN_STABLE_SCROLLS = 4;
 const CHANNEL_SCAN_RECENT_OLDER_COUNT = 8;
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+const WATCHED_ITEM_TEXT = 'Mark as watched';
 
 const CONTAINER_CACHE = new WeakMap();
 
@@ -68,37 +68,11 @@ const WORKER_WINDOW_FEATURES = [
   `height=${WORKER_WINDOW_BOUNDS.height}`
 ].join(",");
 
-const MENU_LIST_SELECTOR = [
-  "tp-yt-paper-listbox",
-  "#items",
-  "ytd-menu-popup-renderer",
-  "yt-list-view-model"
-].join(",");
-
-const MENU_ITEMS_SELECTOR = [
-  "[role='menuitem']",
-  "ytd-menu-service-item-renderer",
-  "ytd-toggle-menu-service-item-renderer",
-  "yt-list-item-view-model",
-  "button",
-  "a"
-].join(",");
-
-const MENU_POPUP_SELECTOR = [
-  "ytd-menu-popup-renderer",
-  "tp-yt-paper-listbox",
-  "tp-yt-iron-dropdown",
-  "ytd-popup-container",
-  "yt-list-view-model"
-].join(",");
-
-let scanTimer = null;
 let lastMenuVideoUrl = null;
 let lastMenuVideoTitle = "";
 let pendingOpenedWorkerWindow = null;
 let pendingOpenedWorkerUrl = null;
 let canOpenWorkerWindow = true;
-let overlayMenuItem = null;
 
 const extensionApi = getExtensionApi();
 
@@ -937,7 +911,7 @@ function openWorkerWindow(workerUrl) {
   }
 }
 
-async function enqueueDirectOpen(url, title, item) {
+async function enqueueDirectOpen(url, title) {
   const workerUrl = buildWorkerUrl(url);
   let openedWorkerWindow = pendingOpenedWorkerUrl === workerUrl
     ? pendingOpenedWorkerWindow
@@ -983,252 +957,10 @@ async function enqueueDirectOpen(url, title, item) {
     openedWorkerWindow.close();
   }
 
-  if (item) {
-    setMenuItemText(item, response && response.created
-      ? "Added to watch queue"
-      : "Already in watch queue");
-  }
-
   return response;
 }
 
-function createMenuItem() {
-  const item = document.createElement("button");
-  item.type = "button";
-  item.className = MENU_ITEM_CLASS;
-  item.setAttribute("role", "menuitem");
-  item.dataset.youtubeWatchedMarkerBusy = "false";
-
-  const icon = document.createElement("span");
-  icon.className = "youtube-watched-marker-icon";
-  icon.setAttribute("aria-hidden", "true");
-  icon.textContent = "+";
-
-  const label = document.createElement("span");
-  label.className = "youtube-watched-marker-label";
-  label.textContent = "Mark as watched";
-
-  item.append(icon, label);
-
-  const activate = async (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation();
-
-    if (item.dataset.youtubeWatchedMarkerBusy === "true") {
-      return;
-    }
-
-    item.dataset.youtubeWatchedMarkerBusy = "true";
-    const url = lastMenuVideoUrl || getFallbackVideoUrl();
-    const title = lastMenuVideoTitle || document.title.replace(/ - YouTube$/, "").trim();
-
-    if (!url) {
-      setMenuItemText(item, "No video found");
-      item.dataset.youtubeWatchedMarkerBusy = "false";
-      return;
-    }
-
-    setMenuItemText(item, pendingOpenedWorkerWindow ? "Adding..." : "Opening...");
-
-    try {
-      await enqueueDirectOpen(url, title, item);
-      closeYouTubeMenu(item);
-    } catch (error) {
-      console.error(error);
-      setMenuItemText(item, "Could not add video");
-      item.dataset.youtubeWatchedMarkerBusy = "false";
-    }
-  };
-
-  const handlePointerDown = (event) => {
-    event.stopPropagation();
-    event.stopImmediatePropagation();
-
-    if (item.dataset.youtubeWatchedMarkerBusy === "true") {
-      return;
-    }
-
-    if (!canOpenWorkerWindow) {
-      return;
-    }
-
-    const url = lastMenuVideoUrl || getFallbackVideoUrl();
-    const workerUrl = buildWorkerUrl(url);
-
-    if (!workerUrl || pendingOpenedWorkerWindow) {
-      return;
-    }
-
-    pendingOpenedWorkerUrl = workerUrl;
-    pendingOpenedWorkerWindow = openWorkerWindow(workerUrl);
-
-    if (pendingOpenedWorkerWindow) {
-      canOpenWorkerWindow = false;
-    }
-  };
-
-  const stopPointerEvent = (event) => {
-    event.stopPropagation();
-    event.stopImmediatePropagation();
-  };
-
-  item.addEventListener("pointerdown", handlePointerDown);
-  item.addEventListener("mousedown", stopPointerEvent);
-  item.addEventListener("mouseup", stopPointerEvent);
-  item.addEventListener("pointerup", activate);
-  item.addEventListener("pointerenter", () => setMenuItemHover(item, true));
-  item.addEventListener("pointerleave", () => setMenuItemHover(item, false));
-  item.addEventListener("focus", () => setMenuItemHover(item, true));
-  item.addEventListener("blur", () => setMenuItemHover(item, false));
-  item.addEventListener("click", activate);
-  item.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" || event.key === " ") {
-      activate(event).catch(console.error);
-    }
-  });
-
-  return item;
-}
-
-function setMenuItemHover(item, active) {
-  const colors = getMenuColors();
-  item.style.background = active
-    ? colors.hoverBackground
-    : colors.background;
-  item.style.opacity = "1";
-  item.style.color = colors.text;
-
-  for (const child of item.children) {
-    child.style.opacity = "1";
-    child.style.color = colors.text;
-  }
-}
-
-function getMenuColors() {
-  const rootStyle = window.getComputedStyle(document.documentElement);
-  const isPageDark = isDarkThemeFromPage();
-  const text = normalizeCssColor(
-    rootStyle.getPropertyValue("--yt-spec-text-primary"),
-    isPageDark ? DARK_MENU_TEXT : LIGHT_MENU_TEXT
-  );
-  let background = normalizeCssColor(
-    rootStyle.getPropertyValue("--yt-spec-menu-background") ||
-      rootStyle.getPropertyValue("--yt-spec-base-background"),
-    isDarkColor(text) ? DARK_MENU_BACKGROUND : LIGHT_MENU_BACKGROUND
-  );
-  const textIsDark = isDarkColor(text);
-  const backgroundIsDark = isDarkColor(background);
-
-  if (textIsDark === backgroundIsDark || !hasReadableContrast(text, background)) {
-    background = textIsDark ? LIGHT_MENU_BACKGROUND : DARK_MENU_BACKGROUND;
-  }
-
-  return {
-    background,
-    hoverBackground: mixRgbColors(background, text, isDarkColor(background) ? 0.16 : 0.08),
-    text
-  };
-}
-
-function isDarkThemeFromPage() {
-  return document.documentElement.hasAttribute("dark") ||
-    document.querySelector("ytd-app[dark], ytd-page-manager[dark]");
-}
-
-function normalizeCssColor(value, fallback) {
-  const trimmed = String(value || "").trim();
-
-  if (!trimmed) {
-    return fallback;
-  }
-
-  const probe = document.createElement("span");
-  probe.style.color = trimmed;
-
-  if (!probe.style.color) {
-    return fallback;
-  }
-
-  document.documentElement.append(probe);
-  const color = window.getComputedStyle(probe).color || fallback;
-  probe.remove();
-  return color;
-}
-
-function parseRgbColor(value) {
-  const match = String(value).match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
-
-  if (!match) {
-    return null;
-  }
-
-  return {
-    r: Number(match[1]),
-    g: Number(match[2]),
-    b: Number(match[3])
-  };
-}
-
-function isDarkColor(value) {
-  const rgb = parseRgbColor(value);
-
-  if (!rgb) {
-    return isDarkThemeFromPage();
-  }
-
-  return ((rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000) < 128;
-}
-
-function getRelativeLuminance(value) {
-  const rgb = parseRgbColor(value);
-
-  if (!rgb) {
-    return null;
-  }
-
-  const channel = (color) => {
-    const normalized = color / 255;
-    return normalized <= 0.03928
-      ? normalized / 12.92
-      : ((normalized + 0.055) / 1.055) ** 2.4;
-  };
-
-  return (0.2126 * channel(rgb.r)) +
-    (0.7152 * channel(rgb.g)) +
-    (0.0722 * channel(rgb.b));
-}
-
-function hasReadableContrast(foreground, background) {
-  const foregroundLuminance = getRelativeLuminance(foreground);
-  const backgroundLuminance = getRelativeLuminance(background);
-
-  if (foregroundLuminance === null || backgroundLuminance === null) {
-    return true;
-  }
-
-  const lighter = Math.max(foregroundLuminance, backgroundLuminance);
-  const darker = Math.min(foregroundLuminance, backgroundLuminance);
-
-  return (lighter + 0.05) / (darker + 0.05) >= 4.5;
-}
-
-function mixRgbColors(baseValue, overlayValue, amount) {
-  const base = parseRgbColor(baseValue);
-  const overlay = parseRgbColor(overlayValue);
-
-  if (!base || !overlay) {
-    return baseValue;
-  }
-
-  const mix = (baseChannel, overlayChannel) => Math.round(
-    baseChannel * (1 - amount) + overlayChannel * amount
-  );
-
-  return `rgb(${mix(base.r, overlay.r)}, ${mix(base.g, overlay.g)}, ${mix(base.b, overlay.b)})`;
-}
-
-function closeYouTubeMenu(item) {
+function closeYouTubeMenu() {
   const escapeEvent = new KeyboardEvent("keydown", {
     key: "Escape",
     code: "Escape",
@@ -1237,8 +969,6 @@ function closeYouTubeMenu(item) {
     bubbles: true,
     cancelable: true
   });
-
-  removeOverlayMenuItem();
 
   window.dispatchEvent(escapeEvent);
   document.documentElement.dispatchEvent(escapeEvent);
@@ -1253,180 +983,49 @@ function closeYouTubeMenu(item) {
   });
 }
 
-function setMenuItemText(item, text) {
-  const label = item.querySelector(".youtube-watched-marker-label") || item;
-  label.textContent = text;
-}
-
-function styleMenuItem(item) {
-  item.style.display = "flex";
-  item.style.alignItems = "center";
-  item.style.gap = "16px";
-  item.style.width = "100%";
-  item.style.maxWidth = "100%";
-  item.style.minWidth = "0";
-  item.style.minHeight = "40px";
-  item.style.padding = "0 16px";
-  item.style.color = getMenuColors().text;
-  item.style.background = "transparent";
-  item.style.border = "0";
-  item.style.boxSizing = "border-box";
-  item.style.cursor = "pointer";
-  item.style.font = "400 14px Roboto, Arial, sans-serif";
-  item.style.lineHeight = "20px";
-  item.style.overflow = "hidden";
-  item.style.textAlign = "left";
-
-  const icon = item.querySelector(".youtube-watched-marker-icon");
-  if (icon) {
-    icon.style.flex = "0 0 24px";
-    icon.style.width = "24px";
-    icon.style.height = "24px";
-    icon.style.lineHeight = "24px";
-    icon.style.textAlign = "center";
-  }
-
-  const label = item.querySelector(".youtube-watched-marker-label");
-  if (label) {
-    label.style.display = "inline-block";
-    label.style.flex = "1 1 auto";
-    label.style.minWidth = "0";
-    label.style.overflow = "hidden";
-    label.style.textOverflow = "ellipsis";
-    label.style.color = getMenuColors().text;
-    label.style.whiteSpace = "nowrap";
-  }
-}
-
-function getMenuList(menu) {
-  if (!menu) {
-    return null;
-  }
-
-  if (menu.matches("tp-yt-paper-listbox, #items, yt-list-view-model")) {
-    return menu;
-  }
-
-  return menu.querySelector(MENU_LIST_SELECTOR);
-}
-
-function injectIntoMenu(menu) {
-  const list = getMenuList(menu);
-
-  if (!list) {
+function handleWatchedClick() {
+  const url = lastMenuVideoUrl || getFallbackVideoUrl();
+  const title = lastMenuVideoTitle || document.title.replace(/ - YouTube$/, "").trim();
+  if (!url) {
+    closeYouTubeMenu();
     return;
   }
-
-  if (!hasNativeMenuItems(list) || !hasUsableMenuTarget()) {
-    removeOverlayMenuItem();
-    return;
-  }
-
-  showOverlayMenuItem(list);
-}
-
-function showOverlayMenuItem(list) {
-  if (!overlayMenuItem) {
-    overlayMenuItem = createMenuItem();
-    styleMenuItem(overlayMenuItem);
-    overlayMenuItem.style.position = "fixed";
-    overlayMenuItem.style.zIndex = "2147483647";
-    overlayMenuItem.style.boxShadow = "0 8px 24px rgba(0, 0, 0, 0.22)";
-    overlayMenuItem.style.borderRadius = "12px";
-    overlayMenuItem.style.overflow = "hidden";
-    document.documentElement.append(overlayMenuItem);
-  }
-
-  const colors = getMenuColors();
-  overlayMenuItem.style.background = colors.background;
-  overlayMenuItem.style.color = colors.text;
-  const popup = list.closest("ytd-menu-popup-renderer, tp-yt-iron-dropdown, ytd-popup-container") || list;
-  const rect = popup.getBoundingClientRect();
-  const height = 48;
-  const gap = 6;
-  const topBelow = rect.bottom + gap;
-  const topAbove = rect.top - height - gap;
-  const top = topBelow + height <= window.innerHeight
-    ? topBelow
-    : Math.max(8, topAbove);
-
-  overlayMenuItem.style.left = `${Math.max(8, rect.left)}px`;
-  overlayMenuItem.style.top = `${top}px`;
-  overlayMenuItem.style.width = `${Math.max(220, rect.width)}px`;
-  overlayMenuItem.style.height = `${height}px`;
-}
-
-function removeOverlayMenuItem() {
-  if (overlayMenuItem) {
-    overlayMenuItem.remove();
-    overlayMenuItem = null;
-  }
-}
-
-function hasNativeMenuItems(list) {
-  return Array.from(list.querySelectorAll(MENU_ITEMS_SELECTOR)).some((child) => (
-    !child.matches(MENU_ITEM_SELECTOR) &&
-    child.getBoundingClientRect().height > 0
-  ));
-}
-
-function hasUsableMenuTarget() {
-  return Boolean(lastMenuVideoUrl || getFallbackVideoUrl());
-}
-
-function scanMenus(root) {
-  if (root.nodeType === Node.ELEMENT_NODE && root.matches(MENU_POPUP_SELECTOR)) {
-    injectIntoMenu(root);
-  }
-
-  if (root.querySelectorAll) {
-    const menus = root.querySelectorAll(MENU_POPUP_SELECTOR);
-    for (const menu of menus) {
-      injectIntoMenu(menu);
-    }
-  }
-}
-
-function scheduleMenuScan() {
-  clearTimeout(scanTimer);
-  scanTimer = setTimeout(() => {
-    scanMenus(document.documentElement);
-  }, 50);
+  enqueueDirectOpen(url, title).catch(console.error);
+  closeYouTubeMenu();
 }
 
 document.addEventListener("pointerdown", rememberMenuTarget, true);
 document.addEventListener("mousedown", rememberMenuTarget, true);
 document.addEventListener("click", rememberMenuTarget, true);
-document.addEventListener("pointerdown", () => {
-  scheduleMenuScan();
+
+// Capture-phase detection works inside YouTube's shadow DOMs.
+// We avoid window.open() (blocked from capture handlers in FF content scripts)
+// by telling the background to create the worker window via windows.create().
+document.addEventListener('pointerdown', (e) => {
+  const item = e.target.closest('ytd-menu-service-item-renderer, yt-list-item-view-model');
+  if (!item) return;
+  if (!item.textContent.includes(WATCHED_ITEM_TEXT)) return;
+  if (!canOpenWorkerWindow) return;
+  const url = lastMenuVideoUrl || getFallbackVideoUrl();
+  if (!url) return;
+  const workerUrl = buildWorkerUrl(url);
+  if (!workerUrl || pendingOpenedWorkerWindow) return;
+  pendingOpenedWorkerUrl = workerUrl;
+  pendingOpenedWorkerWindow = {}; // dummy truthy — background handles the actual window
+  canOpenWorkerWindow = false;
+  extensionApi.runtime.sendMessage({
+    type: "preopen-worker",
+    workerUrl
+  }).catch(() => {});
 }, true);
-document.addEventListener("pointerup", () => {
-  scheduleMenuScan();
-}, true);
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") {
-    removeOverlayMenuItem();
+
+document.addEventListener('click', (e) => {
+  const item = e.target.closest('ytd-menu-service-item-renderer, yt-list-item-view-model');
+  if (!item) return;
+  if (item.textContent.includes(WATCHED_ITEM_TEXT)) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    handleWatchedClick();
   }
 }, true);
-document.addEventListener("scroll", () => {
-  removeOverlayMenuItem();
-}, true);
-
-const observer = new MutationObserver((mutations) => {
-  for (const mutation of mutations) {
-    for (const node of mutation.addedNodes) {
-      scanMenus(node);
-    }
-  }
-
-  if (overlayMenuItem && !document.querySelector("ytd-menu-popup-renderer, tp-yt-paper-listbox, tp-yt-iron-dropdown, ytd-popup-container, yt-list-view-model")) {
-    removeOverlayMenuItem();
-  }
-});
-
-observer.observe(document.documentElement, {
-  childList: true,
-  subtree: true
-});
-
-scanMenus(document.documentElement);

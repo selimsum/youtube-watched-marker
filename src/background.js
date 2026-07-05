@@ -714,6 +714,14 @@ async function handleRuntimeMessage(message) {
     return undefined;
   }
 
+  if (message.type === "preopen-worker") {
+    // Content script capture handler detected a click on our menu item,
+    // but Firefox blocks window.open() from capture-phase content script listeners.
+    // The background creates the window instead.
+    createWorkerWindow(message.workerUrl).catch(() => {});
+    return undefined;
+  }
+
   if (message.type === "enqueue-video-url") {
     const videoId = extractVideoIdFromUrl(message.url);
 
