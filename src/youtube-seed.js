@@ -5,53 +5,44 @@
   script.id = "ytwm-data-hook";
 
   function hookBody() {
+    console.log("ytwm: hookBody running");
     var WATCHED_TEXT = "Mark as watched";
     var VIDEO_TYPES = ["videoRenderer","compactVideoRenderer","gridVideoRenderer","movieRenderer","compactMovieRenderer","reelItemRenderer","playlistVideoRenderer","compactPlaylistVideoRenderer","channelVideoPlayerRenderer","radioRenderer"];
+
+    function injectItem(items) {
+      if (!Array.isArray(items)) return;
+      var found = false;
+      for (var x = 0; x < items.length; x++) {
+        var sv = items[x] && (items[x].menuServiceItemRenderer || items[x].listItemViewModel);
+        if (!sv) continue;
+        var txt = sv.text || (sv.title && sv.title.content);
+        var runs = txt && txt.runs;
+        var match = runs ? runs[0] && runs[0].text === WATCHED_TEXT : txt === WATCHED_TEXT;
+        if (match) { found = true; break; }
+      }
+      if (found) return;
+      if (items[0] && items[0].menuServiceItemRenderer) {
+        items.push({menuServiceItemRenderer:{text:{runs:[{text:WATCHED_TEXT}]},icon:{iconType:"CHECK"},trackingParams:"Cg==",serviceEndpoint:{commandMetadata:{webCommandMetadata:{sendPost:false,apiUrl:""}}}}});
+      } else if (items[0] && items[0].listItemViewModel) {
+        console.log("ytwm: injecting listItemViewModel into sheet menu");
+        var baseCtx = items[0].listItemViewModel.rendererContext;
+        var newItem = {listItemViewModel:{title:{content:WATCHED_TEXT},leadingImage:{sources:[{clientResource:{imageName:"CHECK"}}]}}};
+        if (baseCtx) newItem.listItemViewModel.rendererContext = JSON.parse(JSON.stringify(baseCtx));
+        items.push(newItem);
+      }
+    }
 
     function injectInto(val, visited) {
       if (!val || typeof val !== "object" || visited.has(val)) return;
       visited.add(val);
 
-      for (var t = 0; t < VIDEO_TYPES.length; t++) {
-        var r = val[VIDEO_TYPES[t]];
-        if (r && r.menu && r.menu.menuRenderer && Array.isArray(r.menu.menuRenderer.items) && r.menu.menuRenderer.items.length > 0) {
-          var items = r.menu.menuRenderer.items;
-          var found = false;
-          for (var i = 0; i < items.length; i++) {
-            if (items[i] && items[i].menuServiceItemRenderer && items[i].menuServiceItemRenderer.text && items[i].menuServiceItemRenderer.text.runs && items[i].menuServiceItemRenderer.text.runs[0] && items[i].menuServiceItemRenderer.text.runs[0].text === WATCHED_TEXT) {
-              found = true;
-              break;
-            }
-          }
-          if (!found) {
-            items.push({menuServiceItemRenderer:{text:{runs:[{text:WATCHED_TEXT}]},icon:{iconType:"ADD_TO_QUEUE_TAIL"},trackingParams:"Cg==",serviceEndpoint:{commandMetadata:{webCommandMetadata:{sendPost:false,apiUrl:""}}}}});
-          }
-        }
-      }
-
+      // Direct checks for known menu locations
       if (val.commentRenderer && val.commentRenderer.actionMenu && val.commentRenderer.actionMenu.menuRenderer && Array.isArray(val.commentRenderer.actionMenu.menuRenderer.items)) {
-        var citems = val.commentRenderer.actionMenu.menuRenderer.items;
-        var cfound = false;
-        for (var ci = 0; ci < citems.length; ci++) {
-          if (citems[ci] && citems[ci].menuServiceItemRenderer && citems[ci].menuServiceItemRenderer.text && citems[ci].menuServiceItemRenderer.text.runs && citems[ci].menuServiceItemRenderer.text.runs[0] && citems[ci].menuServiceItemRenderer.text.runs[0].text === WATCHED_TEXT) { cfound = true; break; }
-        }
-        if (!cfound) {
-          citems.push({menuServiceItemRenderer:{text:{runs:[{text:WATCHED_TEXT}]},icon:{iconType:"ADD_TO_QUEUE_TAIL"},trackingParams:"Cg==",serviceEndpoint:{commandMetadata:{webCommandMetadata:{sendPost:false,apiUrl:""}}}}});
-        }
+        injectItem(val.commentRenderer.actionMenu.menuRenderer.items);
       }
-
       if (val.videoActions && val.videoActions.menuRenderer && Array.isArray(val.videoActions.menuRenderer.items)) {
-        var vitems = val.videoActions.menuRenderer.items;
-        var vfound = false;
-        for (var vi = 0; vi < vitems.length; vi++) {
-          if (vitems[vi] && vitems[vi].menuServiceItemRenderer && vitems[vi].menuServiceItemRenderer.text && vitems[vi].menuServiceItemRenderer.text.runs && vitems[vi].menuServiceItemRenderer.text.runs[0] && vitems[vi].menuServiceItemRenderer.text.runs[0].text === WATCHED_TEXT) { vfound = true; break; }
-        }
-        if (!vfound) {
-          vitems.push({menuServiceItemRenderer:{text:{runs:[{text:WATCHED_TEXT}]},icon:{iconType:"ADD_TO_QUEUE_TAIL"},trackingParams:"Cg==",serviceEndpoint:{commandMetadata:{webCommandMetadata:{sendPost:false,apiUrl:""}}}}});
-        }
+        injectItem(val.videoActions.menuRenderer.items);
       }
-
-      // Lockup view model sheet menus
       if (val.lockupViewModel) {
         var cur = val.lockupViewModel;
         cur = cur.metadata && cur.metadata.lockupMetadataViewModel;
@@ -60,35 +51,35 @@
         cur = cur && cur.showSheetCommand && cur.showSheetCommand.panelLoadingStrategy;
         cur = cur && cur.inlineContent && cur.inlineContent.sheetViewModel;
         cur = cur && cur.content && cur.content.listViewModel;
-        if (cur && Array.isArray(cur.listItems) && cur.listItems.length > 0) {
-          var litems = cur.listItems;
-          var lfound = false;
-          for (var li = 0; li < litems.length; li++) {
-            if (litems[li] && litems[li].listItemViewModel && litems[li].listItemViewModel.title && litems[li].listItemViewModel.title.content === WATCHED_TEXT) { lfound = true; break; }
-          }
-          if (!lfound) {
-            var baseCtx = litems[0] && litems[0].listItemViewModel && litems[0].listItemViewModel.rendererContext;
-            var newItem = {listItemViewModel:{title:{content:WATCHED_TEXT},leadingImage:{sources:[{clientResource:{imageName:'QUEUE_ADD_TO'}}]}}};
-            if (baseCtx) { newItem.listItemViewModel.rendererContext = JSON.parse(JSON.stringify(baseCtx)); }
-            litems.push(newItem);
-          }
+        if (cur && Array.isArray(cur.listItems)) {
+          console.log("ytwm: lockupViewModel direct handler hit, listItems length:", cur.listItems.length);
+          injectItem(cur.listItems);
         }
       }
 
-      if (Array.isArray(val)) {
-        for (var a = 0; a < val.length; a++) {
-          if (val[a] && typeof val[a] === "object") injectInto(val[a], visited);
+      // Generic: find ANY items array with menuServiceItemRenderer that we can inject into
+      var keys = Object.keys(val);
+      for (var k = 0; k < keys.length; k++) {
+        var child = val[keys[k]];
+        if (Array.isArray(child) && child.length > 0) {
+          var isMenu = false;
+          for (var ci = 0; ci < child.length && ci < 3; ci++) {
+            if (child[ci] && (child[ci].menuServiceItemRenderer || child[ci].listItemViewModel)) { isMenu = true; break; }
+          }
+          if (isMenu) injectItem(child);
         }
-      } else {
-        var keys = Object.keys(val);
-        for (var k = 0; k < keys.length; k++) {
-          if (val[keys[k]] && typeof val[keys[k]] === "object") injectInto(val[keys[k]], visited);
-        }
+        if (child && typeof child === "object") injectInto(child, visited);
       }
     }
 
     function modify(js) {
+      console.log("ytwm: modify called", js && typeof js, Array.isArray(js));
       injectInto(js, new WeakSet());
+    }
+    // Inject into ytInitialData right now if it already exists
+    if (window.ytInitialData) {
+      console.log("ytwm: ytInitialData already set, injecting now");
+      try { modify(window.ytInitialData); } catch(e) { console.error("ytwm: error", e); }
     }
 
     // Intercept ytInitialData being set on window
@@ -144,6 +135,7 @@
       }
       return _send.apply(this, arguments);
     };
+    console.log("ytwm: hookBody done");
   }
 
   script.textContent = "(" + hookBody.toString() + ")()";

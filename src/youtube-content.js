@@ -1,9 +1,5 @@
 "use strict";
 
-const style = document.createElement("style");
-style.textContent = "ytd-menu-popup-renderer,tp-yt-paper-listbox{scrollbar-width:none!important;-ms-overflow-style:none!important}";
-document.documentElement.appendChild(style);
-
 const WORKER_WINDOW_BOUNDS = {
   left: 2176,
   top: 144,
@@ -14,6 +10,14 @@ const CHANNEL_SCAN_MAX_SCROLLS = 120;
 const CHANNEL_SCAN_STABLE_SCROLLS = 4;
 const CHANNEL_SCAN_RECENT_OLDER_COUNT = 8;
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Widen contextual sheets to prevent text wrapping (bokblock interaction)
+(function() {
+  var s = document.createElement('script');
+  s.textContent = 'window.__ytwmSheetWidth=function(w){var st=document.getElementById("ytwm-sheet-style")||document.createElement("style");st.id="ytwm-sheet-style";st.textContent=w?"tp-yt-iron-dropdown{min-width:"+w+"px!important;width:auto!important}yt-sheet-view-model{min-width:"+w+"px!important;width:auto!important}yt-contextual-sheet-layout{min-width:"+w+"px!important;width:auto!important}yt-contextual-sheet-layout yt-list-view-model{min-width:"+(w-10)+"px!important}yt-contextual-sheet-layout yt-list-item-view-model{min-width:"+(w-10)+"px!important}":"";if(w){document.documentElement.appendChild(st)}else{st.remove()}};window.__ytwmSheetWidth(240)';
+  document.documentElement.appendChild(s);
+  s.remove();
+})();
 
 const WATCHED_ITEM_TEXT = 'Mark as watched';
 
