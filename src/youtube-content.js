@@ -729,7 +729,9 @@ function getVideoContainers(root) {
   }
 
   if (root.querySelectorAll) {
-    containers.push(...root.querySelectorAll(VIDEO_CONTAINERS_SELECTOR));
+    for (const container of root.querySelectorAll(VIDEO_CONTAINERS_SELECTOR)) {
+      containers.push(container);
+    }
   }
 
   return containers;
