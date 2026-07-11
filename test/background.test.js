@@ -347,3 +347,40 @@ describe("closeTabQuietly", () => {
     assert.strictEqual(sandbox.removeCalledWith, 456);
   });
 });
+
+describe("shouldIgnorePrimaryFallbackBounds", () => {
+  it("should return true when requested is secondary and actual is primary fallback", () => {
+    // DEFAULT_WORKER_WINDOW_BOUNDS.left is 2176, PRIMARY_SCREEN_MAX_LEFT is 1000
+    const actualBounds = { left: 999 };
+    const requestedBounds = { left: 2176 };
+    assert.strictEqual(sandbox.shouldIgnorePrimaryFallbackBounds(actualBounds, requestedBounds), true);
+  });
+
+  it("should return false when requested is primary", () => {
+    const actualBounds = { left: 999 };
+    const requestedBounds = { left: 2175 }; // less than 2176
+    assert.strictEqual(sandbox.shouldIgnorePrimaryFallbackBounds(actualBounds, requestedBounds), false);
+  });
+
+  it("should return false when actual is not primary fallback", () => {
+    const actualBounds = { left: 1000 }; // not less than 1000
+    const requestedBounds = { left: 2176 };
+    assert.strictEqual(sandbox.shouldIgnorePrimaryFallbackBounds(actualBounds, requestedBounds), false);
+  });
+
+  it("should return false when both conditions are false", () => {
+    const actualBounds = { left: 1000 };
+    const requestedBounds = { left: 2175 };
+    assert.strictEqual(sandbox.shouldIgnorePrimaryFallbackBounds(actualBounds, requestedBounds), false);
+  });
+
+  it("should handle boundary conditions correctly", () => {
+    // requestedBounds.left === 2176 is true (>= 2176)
+    // actualBounds.left === 999 is true (< 1000)
+    assert.strictEqual(sandbox.shouldIgnorePrimaryFallbackBounds({ left: 999 }, { left: 2176 }), true);
+
+    // requestedBounds.left === 2175 is false (>= 2176)
+    // actualBounds.left === 1000 is false (< 1000)
+    assert.strictEqual(sandbox.shouldIgnorePrimaryFallbackBounds({ left: 1000 }, { left: 2175 }), false);
+  });
+});
