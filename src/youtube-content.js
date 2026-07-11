@@ -286,6 +286,15 @@ function getPublishDateInfo(container, videoId, pageDataDates) {
   return null;
 }
 
+const PUBLISH_TEXT_SELECTORS = [
+  "#metadata-line span",
+  "span.inline-metadata-item",
+  "span.yt-core-attributed-string",
+  "yt-formatted-string",
+  "[aria-label]",
+  "[title]"
+].join(",");
+
 function getPublishTextCandidates(container) {
   if (!container) {
     return [];
@@ -297,16 +306,8 @@ function getPublishTextCandidates(container) {
   }
 
   const candidates = [];
-  const selectors = [
-    "#metadata-line span",
-    "span.inline-metadata-item",
-    "span.yt-core-attributed-string",
-    "yt-formatted-string",
-    "[aria-label]",
-    "[title]"
-  ];
 
-  for (const element of container.querySelectorAll(selectors.join(","))) {
+  for (const element of container.querySelectorAll(PUBLISH_TEXT_SELECTORS)) {
     const text = [
       element.getAttribute("aria-label"),
       element.getAttribute("title"),
