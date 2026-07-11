@@ -58,17 +58,20 @@
       }
 
       // Generic: find ANY items array with menuServiceItemRenderer that we can inject into
-      var keys = Object.keys(val);
-      for (var k = 0; k < keys.length; k++) {
-        var child = val[keys[k]];
-        if (Array.isArray(child) && child.length > 0) {
-          var isMenu = false;
-          for (var ci = 0; ci < child.length && ci < 3; ci++) {
-            if (child[ci] && (child[ci].menuServiceItemRenderer || child[ci].listItemViewModel)) { isMenu = true; break; }
+      var children = Array.isArray(val) ? val : Object.values(val);
+      for (var k = 0, len = children.length; k < len; k++) {
+        var child = children[k];
+        if (child && typeof child === "object") {
+          if (Array.isArray(child) && child.length > 0) {
+            var isMenu = false;
+            for (var ci = 0, clen = child.length; ci < clen && ci < 3; ci++) {
+              var cci = child[ci];
+              if (cci && (cci.menuServiceItemRenderer || cci.listItemViewModel)) { isMenu = true; break; }
+            }
+            if (isMenu) injectItem(child);
           }
-          if (isMenu) injectItem(child);
+          injectInto(child, visited);
         }
-        if (child && typeof child === "object") injectInto(child, visited);
       }
     }
 
