@@ -175,3 +175,39 @@ describe("normalizeDateText", () => {
     assert.strictEqual(sandbox.normalizeDateText("MAYI\u015e"), "mayis");
   });
 });
+
+describe("isVideoUrl", () => {
+  it("should return true for /watch? paths", () => {
+    assert.strictEqual(sandbox.isVideoUrl("/watch?v=dQw4w9WgXcQ"), true);
+    assert.strictEqual(sandbox.isVideoUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ"), true);
+  });
+
+  it("should return true for /shorts/ paths", () => {
+    assert.strictEqual(sandbox.isVideoUrl("/shorts/abcdefghijk"), true);
+    assert.strictEqual(sandbox.isVideoUrl("https://www.youtube.com/shorts/abcdefghijk"), true);
+  });
+
+  it("should return true for /live/ paths", () => {
+    assert.strictEqual(sandbox.isVideoUrl("/live/123456789"), true);
+    assert.strictEqual(sandbox.isVideoUrl("https://www.youtube.com/live/123456789"), true);
+  });
+
+  it("should return false for unrelated paths", () => {
+    assert.strictEqual(sandbox.isVideoUrl("/user/mkbhd"), false);
+    assert.strictEqual(sandbox.isVideoUrl("/feed/subscriptions"), false);
+    assert.strictEqual(sandbox.isVideoUrl("https://www.youtube.com/"), false);
+    assert.strictEqual(sandbox.isVideoUrl("/"), false);
+  });
+
+  it("should return false for invalid or empty inputs", () => {
+    assert.strictEqual(sandbox.isVideoUrl(null), false);
+    assert.strictEqual(sandbox.isVideoUrl(undefined), false);
+    assert.strictEqual(sandbox.isVideoUrl(""), false);
+  });
+
+  it("should handle non-string inputs gracefully", () => {
+    assert.strictEqual(sandbox.isVideoUrl({}), false);
+    assert.strictEqual(sandbox.isVideoUrl(123), false);
+    assert.strictEqual(sandbox.isVideoUrl(true), false);
+  });
+});
