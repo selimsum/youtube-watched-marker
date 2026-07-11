@@ -347,3 +347,76 @@ describe("closeTabQuietly", () => {
     assert.strictEqual(sandbox.removeCalledWith, 456);
   });
 });
+
+describe("normalizeWorkerBounds", () => {
+  let originalDefaultBounds;
+
+  beforeEach(() => {
+    // expose the function and constants to the sandbox for testing since they aren't exported
+    vm.runInContext(`
+      globalThis.normalizeWorkerBounds = normalizeWorkerBounds;
+      globalThis.DEFAULT_WORKER_WINDOW_BOUNDS = DEFAULT_WORKER_WINDOW_BOUNDS;
+    `, sandbox);
+    originalDefaultBounds = sandbox.DEFAULT_WORKER_WINDOW_BOUNDS;
+  });
+
+  it("should return the default bounds for an empty object", () => {
+    assert.deepEqual(sandbox.normalizeWorkerBounds({}), originalDefaultBounds);
+  });
+
+  it("should use provided valid bounds", () => {
+    const input = { left: 100, top: 200, width: 800, height: 600 };
+    assert.deepEqual(sandbox.normalizeWorkerBounds(input), input);
+  });
+
+  it("should parse string representations of numbers", () => {
+    const input = { left: "100", top: "200", width: "800", height: "600" };
+    const expected = { left: 100, top: 200, width: 800, height: 600 };
+    assert.deepEqual(sandbox.normalizeWorkerBounds(input), expected);
+  });
+
+  it("should use defaults for missing properties", () => {
+    const input = { left: 100, width: 800 };
+    const expected = {
+      left: 100,
+      top: originalDefaultBounds.top,
+      width: 800,
+      height: originalDefaultBounds.height
+    };
+    assert.deepEqual(sandbox.normalizeWorkerBounds(input), expected);
+  });
+
+  it("should use defaults for invalid or non-finite types", () => {
+    const input = { left: null, top: undefined, width: {}, height: [] };
+    const expected = {
+      left: 0, // Number(null) is 0
+      top: originalDefaultBounds.top, // Number(undefined) is NaN -> default
+      width: originalDefaultBounds.width, // Number({}) is NaN -> default
+      height: 320 // Number([]) is 0 -> clamped to 320
+    };
+    assert.deepEqual(sandbox.normalizeWorkerBounds(input), expected);
+  });
+
+  it("should enforce minimum width and height of 320", () => {
+    const input = { left: 100, top: 200, width: 100, height: 100 };
+    const expected = { left: 100, top: 200, width: 320, height: 320 };
+    assert.deepEqual(sandbox.normalizeWorkerBounds(input), expected);
+  });
+
+  it("should enforce maximum width and height to defaults", () => {
+    const input = { left: 100, top: 200, width: 2000, height: 2000 };
+    const expected = {
+      left: 100,
+      top: 200,
+      width: originalDefaultBounds.width,
+      height: originalDefaultBounds.height
+    };
+    assert.deepEqual(sandbox.normalizeWorkerBounds(input), expected);
+  });
+
+  it("should round float values", () => {
+    const input = { left: 10.5, top: 20.2, width: 800.8, height: 600.3 };
+    const expected = { left: 11, top: 20, width: 801, height: 600 };
+    assert.deepEqual(sandbox.normalizeWorkerBounds(input), expected);
+  });
+});
