@@ -347,3 +347,30 @@ describe("closeTabQuietly", () => {
     assert.strictEqual(sandbox.removeCalledWith, 456);
   });
 });
+
+describe("getSafeSavedWorkerBounds", () => {
+  it("should return original bounds when left is within valid range", () => {
+    const bounds = { left: 1500, top: 100, width: 800, height: 600 };
+    assert.deepEqual(sandbox.getSafeSavedWorkerBounds(bounds), bounds);
+  });
+
+  it("should reset position when left is too far left (< 1000)", () => {
+    const bounds = { left: 999, top: 100, width: 800, height: 600 };
+    const expected = { left: 1920, top: 0, width: 800, height: 600 };
+    assert.deepEqual(sandbox.getSafeSavedWorkerBounds(bounds), expected);
+  });
+
+  it("should reset position when left is too far right (> 2300)", () => {
+    const bounds = { left: 2301, top: 100, width: 800, height: 600 };
+    const expected = { left: 1920, top: 0, width: 800, height: 600 };
+    assert.deepEqual(sandbox.getSafeSavedWorkerBounds(bounds), expected);
+  });
+
+  it("should return original bounds at exact boundary edges", () => {
+    const leftBound = { left: 1000, top: 100, width: 800, height: 600 };
+    assert.deepEqual(sandbox.getSafeSavedWorkerBounds(leftBound), leftBound);
+
+    const rightBound = { left: 2300, top: 100, width: 800, height: 600 };
+    assert.deepEqual(sandbox.getSafeSavedWorkerBounds(rightBound), rightBound);
+  });
+});
