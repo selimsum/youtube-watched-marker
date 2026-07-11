@@ -347,3 +347,29 @@ describe("closeTabQuietly", () => {
     assert.strictEqual(sandbox.removeCalledWith, 456);
   });
 });
+describe("formatBounds", () => {
+  it("should return a formatted string with valid bounds", () => {
+    assert.strictEqual(sandbox.formatBounds({ left: 10, top: 20, width: 800, height: 600 }), "10,20,800x600");
+  });
+
+  it("should handle negative bounds and zeroes", () => {
+    assert.strictEqual(sandbox.formatBounds({ left: -10, top: 0, width: 0, height: -50 }), "-10,0,0x-50");
+  });
+
+  it("should handle missing properties by stringifying as undefined", () => {
+    assert.strictEqual(sandbox.formatBounds({ left: 10, width: 800 }), "10,undefined,800xundefined");
+  });
+
+  it("should throw an error for null or undefined input", () => {
+    assert.throws(() => {
+      sandbox.formatBounds(null);
+    }, (err) => {
+      return err.name === "TypeError";
+    });
+    assert.throws(() => {
+      sandbox.formatBounds(undefined);
+    }, (err) => {
+      return err.name === "TypeError";
+    });
+  });
+});
