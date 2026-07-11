@@ -347,3 +347,25 @@ describe("closeTabQuietly", () => {
     assert.strictEqual(sandbox.removeCalledWith, 456);
   });
 });
+
+describe("isWorkerWatchUrl", () => {
+  it("should return true for valid YouTube watch URLs with ytwm_worker=1", () => {
+    assert.strictEqual(sandbox.isWorkerWatchUrl("https://www.youtube.com/watch?v=123&ytwm_worker=1"), true);
+  });
+
+  it("should return false for valid YouTube watch URLs missing ytwm_worker=1", () => {
+    assert.strictEqual(sandbox.isWorkerWatchUrl("https://www.youtube.com/watch?v=123"), false);
+  });
+
+  it("should return false for valid YouTube watch URLs with ytwm_worker not equal to 1", () => {
+    assert.strictEqual(sandbox.isWorkerWatchUrl("https://www.youtube.com/watch?v=123&ytwm_worker=0"), false);
+  });
+
+  it("should return false for invalid URLs", () => {
+    assert.strictEqual(sandbox.isWorkerWatchUrl("not-a-url"), false);
+  });
+
+  it("should return false for non-YouTube host URLs with ytwm_worker=1", () => {
+    assert.strictEqual(sandbox.isWorkerWatchUrl("https://example.com/watch?v=123&ytwm_worker=1"), false);
+  });
+});
