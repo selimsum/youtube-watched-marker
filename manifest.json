@@ -67,5 +67,8 @@
       },
       "strict_min_version": "115.0"
     }
-  }
+  },
+  "web_accessible_resources": [
+    "src/youtube-seed-hook.js"
+  ]
 }
