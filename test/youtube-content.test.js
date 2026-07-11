@@ -17,8 +17,8 @@ const sandbox = {
     clearTimeout: clearTimeout
   },
   document: {
-    createElement: () => ({ style: {}, classList: { add: () => {} } }),
-    documentElement: { append: () => {} },
+    createElement: () => ({ style: {}, classList: { add: () => {} }, remove: () => {} }),
+    documentElement: { append: () => {}, appendChild: () => {} },
     querySelector: () => null,
     querySelectorAll: () => [],
     addEventListener: () => {},
