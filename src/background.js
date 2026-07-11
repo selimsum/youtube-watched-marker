@@ -1261,11 +1261,11 @@ function urlsMatchIgnoringEncoding(actualUrl, expectedUrl) {
 }
 
 async function forceWorkerWindowBoundsRepeatedly(windowId, bounds) {
-  for (const delayMs of [0, 250, 750, 1500]) {
-    setTimeout(() => {
-      forceWorkerWindowBounds(windowId, bounds).catch(() => {});
-    }, delayMs);
-  }
+  const enforceBounds = () => forceWorkerWindowBounds(windowId, bounds).catch(() => {});
+  setTimeout(enforceBounds, 0);
+  setTimeout(enforceBounds, 250);
+  setTimeout(enforceBounds, 750);
+  setTimeout(enforceBounds, 1500);
 
   await delay(75);
 }
