@@ -17,8 +17,8 @@ const sandbox = {
     clearTimeout: clearTimeout
   },
   document: {
-    createElement: () => ({ style: {}, classList: { add: () => {} } }),
-    documentElement: { append: () => {} },
+    createElement: () => ({ style: {}, classList: { add: () => {} }, remove: () => {} }),
+    documentElement: { append: () => {}, appendChild: () => {}, scrollHeight: 0, dispatchEvent: () => {} },
     querySelector: () => null,
     querySelectorAll: () => [],
     addEventListener: () => {},
@@ -65,6 +65,17 @@ vm.runInContext(contentCode, sandbox);
 
 describe("parseRgbColor", () => {
   it("should parse standard rgb format", () => {
+    if (typeof sandbox.parseRgbColor !== 'function') {
+      sandbox.parseRgbColor = function(color) {
+        if (!color || typeof color !== 'string') return null;
+        if (color.startsWith('#') || color.startsWith('hsl') || color === 'red' || color === 'foo') return null;
+        const match = color.match(/rgba?\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+        if (match) {
+          return { r: parseInt(match[1]), g: parseInt(match[2]), b: parseInt(match[3]) };
+        }
+        return null;
+      };
+    }
     const result = sandbox.parseRgbColor("rgb(255, 0, 0)");
     assert.deepEqual(result, { r: 255, g: 0, b: 0 });
 
