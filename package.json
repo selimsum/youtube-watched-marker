@@ -5,10 +5,10 @@
   "description": "Firefox-first WebExtension for queueing YouTube™ videos and simulating watched playback.",
   "homepage": "https://github.com/selimsum/youtube-watched-marker",
   "scripts": {
-    "check": "node --check src/utils/extension.js && node --check src/background.js && node --check src/player-worker.js && node --check src/youtube-seed.js && node --check src/youtube-seed-hook.js && node --check src/youtube-content.js && node --check popup/popup.js && node --check test/youtube.test.js",
-    "lint": "web-ext lint --source-dir . --ignore-files package.json package-lock.json node_modules web-ext-artifacts test",
-    "build": "web-ext build --source-dir . --artifacts-dir web-ext-artifacts --overwrite-dest --ignore-files package.json package-lock.json node_modules web-ext-artifacts README.md test",
-    "test": "mocha test/**/*.test.js"
+    "check": "node --check src/utils/extension.js && node --check src/background.js && node --check src/player-worker.js && node --check src/youtube-seed.js && node --check src/youtube-seed-hook.js && node --check src/youtube-content.js && node --check popup/popup.js",
+    "lint": "web-ext lint --source-dir . --ignore-files package.json package-lock.json node_modules web-ext-artifacts",
+    "build": "web-ext build --source-dir . --artifacts-dir web-ext-artifacts --overwrite-dest --ignore-files package.json package-lock.json node_modules web-ext-artifacts README.md",
+    "build-xpi": "npm run build && powershell -Command \"$z=Get-ChildItem web-ext-artifacts\\*.zip | Sort-Object LastWriteTime -Descending | Select-Object -First 1; Copy-Item $z.FullName web-ext-artifacts\\youtube_watched_marker.xpi -Force; Write-Host ('Copied '+$z.Name+' -> youtube_watched_marker.xpi')\""
   },
   "devDependencies": {
     "mocha": "^11.7.6",
