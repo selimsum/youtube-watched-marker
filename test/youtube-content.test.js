@@ -17,8 +17,8 @@ const sandbox = {
     clearTimeout: clearTimeout
   },
   document: {
-    createElement: () => ({ style: {}, classList: { add: () => {} } }),
-    documentElement: { append: () => {} },
+    createElement: () => ({ style: {}, classList: { add: () => {} }, remove: () => {} }),
+    documentElement: { append: () => {}, appendChild: () => {} },
     querySelector: () => null,
     querySelectorAll: () => [],
     addEventListener: () => {},
@@ -63,47 +63,33 @@ vm.createContext(sandbox);
 vm.runInContext(utilsCode, sandbox);
 vm.runInContext(contentCode, sandbox);
 
-describe("parseRgbColor", () => {
-  it("should parse standard rgb format", () => {
-    const result = sandbox.parseRgbColor("rgb(255, 0, 0)");
-    assert.deepEqual(result, { r: 255, g: 0, b: 0 });
-
-    const result2 = sandbox.parseRgbColor("rgb(15, 15, 15)");
-    assert.deepEqual(result2, { r: 15, g: 15, b: 15 });
+describe("buildWorkerUrl", () => {
+  it("should return a correctly formatted URL with video ID and ytwm_worker query param for watch URLs", () => {
+    const url = sandbox.buildWorkerUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+    assert.strictEqual(url, "https://www.youtube.com/watch?v=dQw4w9WgXcQ&ytwm_worker=1");
   });
 
-  it("should parse standard rgba format", () => {
-    const result = sandbox.parseRgbColor("rgba(0, 255, 0, 0.5)");
-    assert.deepEqual(result, { r: 0, g: 255, b: 0 });
-
-    const result2 = sandbox.parseRgbColor("rgba(241, 241, 241, 1)");
-    assert.deepEqual(result2, { r: 241, g: 241, b: 241 });
+  it("should return a correctly formatted URL for shorts URLs", () => {
+    const url = sandbox.buildWorkerUrl("https://www.youtube.com/shorts/dQw4w9WgXcQ");
+    assert.strictEqual(url, "https://www.youtube.com/watch?v=dQw4w9WgXcQ&ytwm_worker=1");
   });
 
-  it("should parse formats with varying spaces", () => {
-    const result = sandbox.parseRgbColor("rgb(10,20,30)");
-    assert.deepEqual(result, { r: 10, g: 20, b: 30 });
-
-    const result2 = sandbox.parseRgbColor("rgba(10,   20,  30 , 0.5)");
-    assert.deepEqual(result2, { r: 10, g: 20, b: 30 });
+  it("should return a correctly formatted URL for embed URLs", () => {
+    const url = sandbox.buildWorkerUrl("https://www.youtube.com/embed/dQw4w9WgXcQ");
+    assert.strictEqual(url, "https://www.youtube.com/watch?v=dQw4w9WgXcQ&ytwm_worker=1");
   });
 
-  it("should return null for hex colors", () => {
-    assert.strictEqual(sandbox.parseRgbColor("#ffffff"), null);
-    assert.strictEqual(sandbox.parseRgbColor("#000"), null);
+  it("should return null if the URL is invalid", () => {
+    assert.strictEqual(sandbox.buildWorkerUrl("invalid-url"), null);
   });
 
-  it("should return null for invalid string inputs", () => {
-    assert.strictEqual(sandbox.parseRgbColor("foo"), null);
-    assert.strictEqual(sandbox.parseRgbColor("red"), null);
-    assert.strictEqual(sandbox.parseRgbColor("hsl(0, 100%, 50%)"), null);
+  it("should return null if the URL does not contain a video ID", () => {
+    assert.strictEqual(sandbox.buildWorkerUrl("https://www.youtube.com/feed/subscriptions"), null);
   });
 
-  it("should return null for invalid types", () => {
-    assert.strictEqual(sandbox.parseRgbColor(null), null);
-    assert.strictEqual(sandbox.parseRgbColor(undefined), null);
-    assert.strictEqual(sandbox.parseRgbColor({}), null);
-    assert.strictEqual(sandbox.parseRgbColor(123), null);
+  it("should return null if the input is null or undefined", () => {
+    assert.strictEqual(sandbox.buildWorkerUrl(null), null);
+    assert.strictEqual(sandbox.buildWorkerUrl(undefined), null);
   });
 });
 
