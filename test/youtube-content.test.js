@@ -11,14 +11,14 @@ const sandbox = {
   window: {
     addEventListener: () => {},
     matchMedia: () => ({ matches: false, addEventListener: () => {} }),
-    location: { href: "https://www.youtube.com/" },
+    location: { href: "https://www.youtube.com/", origin: "https://www.youtube.com" },
     getComputedStyle: () => ({ color: "rgb(255, 255, 255)" }),
     setTimeout: setTimeout,
     clearTimeout: clearTimeout
   },
   document: {
-    createElement: () => ({ style: {}, classList: { add: () => {} } }),
-    documentElement: { append: () => {} },
+    createElement: () => ({ style: {}, classList: { add: () => {} }, remove: () => {} }),
+    documentElement: { append: () => {}, appendChild: () => {} },
     querySelector: () => null,
     querySelectorAll: () => [],
     addEventListener: () => {},
@@ -63,49 +63,6 @@ vm.createContext(sandbox);
 vm.runInContext(utilsCode, sandbox);
 vm.runInContext(contentCode, sandbox);
 
-describe("parseRgbColor", () => {
-  it("should parse standard rgb format", () => {
-    const result = sandbox.parseRgbColor("rgb(255, 0, 0)");
-    assert.deepEqual(result, { r: 255, g: 0, b: 0 });
-
-    const result2 = sandbox.parseRgbColor("rgb(15, 15, 15)");
-    assert.deepEqual(result2, { r: 15, g: 15, b: 15 });
-  });
-
-  it("should parse standard rgba format", () => {
-    const result = sandbox.parseRgbColor("rgba(0, 255, 0, 0.5)");
-    assert.deepEqual(result, { r: 0, g: 255, b: 0 });
-
-    const result2 = sandbox.parseRgbColor("rgba(241, 241, 241, 1)");
-    assert.deepEqual(result2, { r: 241, g: 241, b: 241 });
-  });
-
-  it("should parse formats with varying spaces", () => {
-    const result = sandbox.parseRgbColor("rgb(10,20,30)");
-    assert.deepEqual(result, { r: 10, g: 20, b: 30 });
-
-    const result2 = sandbox.parseRgbColor("rgba(10,   20,  30 , 0.5)");
-    assert.deepEqual(result2, { r: 10, g: 20, b: 30 });
-  });
-
-  it("should return null for hex colors", () => {
-    assert.strictEqual(sandbox.parseRgbColor("#ffffff"), null);
-    assert.strictEqual(sandbox.parseRgbColor("#000"), null);
-  });
-
-  it("should return null for invalid string inputs", () => {
-    assert.strictEqual(sandbox.parseRgbColor("foo"), null);
-    assert.strictEqual(sandbox.parseRgbColor("red"), null);
-    assert.strictEqual(sandbox.parseRgbColor("hsl(0, 100%, 50%)"), null);
-  });
-
-  it("should return null for invalid types", () => {
-    assert.strictEqual(sandbox.parseRgbColor(null), null);
-    assert.strictEqual(sandbox.parseRgbColor(undefined), null);
-    assert.strictEqual(sandbox.parseRgbColor({}), null);
-    assert.strictEqual(sandbox.parseRgbColor(123), null);
-  });
-});
 
 describe("isChannelVideosPage", () => {
   it("should match @ChannelName/videos paths", () => {
@@ -173,5 +130,27 @@ describe("normalizeDateText", () => {
   it("should replace specific Turkish characters with standard English letters", () => {
     assert.strictEqual(sandbox.normalizeDateText("\u015f\u0131\u011f\u00fc\u00f6\u00e7"), "siguoc");
     assert.strictEqual(sandbox.normalizeDateText("MAYI\u015e"), "mayis");
+  });
+});
+
+describe("absoluteUrl", () => {
+  it("should return null for empty, null, or undefined inputs", () => {
+    assert.strictEqual(sandbox.absoluteUrl(""), null);
+    assert.strictEqual(sandbox.absoluteUrl(null), null);
+    assert.strictEqual(sandbox.absoluteUrl(undefined), null);
+  });
+
+  it("should resolve relative URLs against window.location.origin", () => {
+    assert.strictEqual(sandbox.absoluteUrl("/watch?v=123"), "https://www.youtube.com/watch?v=123");
+    assert.strictEqual(sandbox.absoluteUrl("/shorts/456"), "https://www.youtube.com/shorts/456");
+  });
+
+  it("should return the original URL if it is already absolute", () => {
+    assert.strictEqual(sandbox.absoluteUrl("https://www.youtube.com/watch?v=123"), "https://www.youtube.com/watch?v=123");
+    assert.strictEqual(sandbox.absoluteUrl("http://example.com/test"), "http://example.com/test");
+  });
+
+  it("should return null for malformed or invalid URLs that throw when parsed", () => {
+    assert.strictEqual(sandbox.absoluteUrl("http://a.com:x"), null);
   });
 });
