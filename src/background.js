@@ -27,18 +27,11 @@ const DEFAULT_WORKER_WINDOW_BOUNDS = {
   width: 1280,
   height: 720
 };
-const SECONDARY_TOP_LEFT_WORKER_BOUNDS = {
-  left: 1920,
-  top: 0,
-  width: 1280,
-  height: 720
-};
-const PRIMARY_SCREEN_MAX_LEFT = 1000;
-const RIGHT_MONITOR_MAX_LEFT = 2300;
 const DEFAULT_WORKER_MODE = "window";
 
 let activeWorker = null;
 let retainedWorker = null;
+let lastKnownWorkerBounds = null;
 
 const extensionApi = getExtensionApi();
 
@@ -536,6 +529,7 @@ async function retainWorkerForNextItem(worker) {
         height: workerWindow.height
       })
     };
+    lastKnownWorkerBounds = { ...retainedWorker.requestedBounds };
     await extensionApi.tabs.update(tab.id, {
       muted: true
     }).catch(() => {});
@@ -1032,18 +1026,6 @@ async function getWorkerWindowBounds() {
   const bounds = result[WORKER_WINDOW_BOUNDS_KEY] || {};
   const normalizedBounds = normalizeWorkerBounds(bounds);
 
-  if (normalizedBounds.left < PRIMARY_SCREEN_MAX_LEFT) {
-    return { ...DEFAULT_WORKER_WINDOW_BOUNDS };
-  }
-
-  if (normalizedBounds.left > RIGHT_MONITOR_MAX_LEFT) {
-    return {
-      ...normalizedBounds,
-      left: DEFAULT_WORKER_WINDOW_BOUNDS.left,
-      top: DEFAULT_WORKER_WINDOW_BOUNDS.top
-    };
-  }
-
   return normalizedBounds;
 }
 
@@ -1069,27 +1051,29 @@ function normalizeWorkerWindowSize(value, fallback) {
 
 async function rememberWorkerWindowBounds(worker) {
   try {
-    const workerWindow = await extensionApi.windows.get(worker.windowId);
-    const actualBounds = normalizeWorkerBounds({
-      left: workerWindow.left,
-      top: workerWindow.top,
-      width: workerWindow.width,
-      height: workerWindow.height
-    });
-    const requestedBounds = normalizeWorkerBounds(worker.requestedBounds || {});
-
-    if (shouldIgnorePrimaryFallbackBounds(actualBounds, requestedBounds)) {
-      await updateQueueItem(worker.itemId, {}, {
-        event: `window-bounds-ignored-primary-fallback-${formatBounds(actualBounds)}`,
-        elapsedMs: null
-      }).catch(() => {});
-      return;
+    let actualBounds;
+    try {
+      const workerWindow = await extensionApi.windows.get(worker.windowId);
+      actualBounds = normalizeWorkerBounds({
+        left: workerWindow.left,
+        top: workerWindow.top,
+        width: workerWindow.width,
+        height: workerWindow.height
+      });
+    } catch {
+      if (!lastKnownWorkerBounds) {
+        return;
+      }
+      actualBounds = normalizeWorkerBounds(lastKnownWorkerBounds);
     }
 
-    const safeBounds = getSafeSavedWorkerBounds(actualBounds);
+    const requestedBounds = normalizeWorkerBounds(worker.requestedBounds || {});
+
+    const safeBounds = actualBounds;
     await extensionApi.storage.local.set({
       [WORKER_WINDOW_BOUNDS_KEY]: safeBounds
     });
+    lastKnownWorkerBounds = null;
     await updateQueueItem(worker.itemId, {}, {
       event: `window-bounds-saved-${formatBounds(safeBounds)}`,
       elapsedMs: null
@@ -1116,7 +1100,7 @@ async function saveCurrentWorkerWindowBounds() {
     width: workerWindow.width,
     height: workerWindow.height
   });
-  const safeBounds = getSafeSavedWorkerBounds(bounds);
+  const safeBounds = bounds;
 
   await extensionApi.storage.local.set({
     [WORKER_WINDOW_BOUNDS_KEY]: safeBounds
@@ -1164,35 +1148,19 @@ function normalizeWorkerBounds(bounds) {
   };
 }
 
-function shouldIgnorePrimaryFallbackBounds(actualBounds, requestedBounds) {
-  const requestedSecondary = requestedBounds.left >= DEFAULT_WORKER_WINDOW_BOUNDS.left;
-  const actualPrimaryFallback = actualBounds.left < PRIMARY_SCREEN_MAX_LEFT;
-
-  return requestedSecondary && actualPrimaryFallback;
-}
-
-function getSafeSavedWorkerBounds(bounds) {
-  if (bounds.left < PRIMARY_SCREEN_MAX_LEFT || bounds.left > RIGHT_MONITOR_MAX_LEFT) {
-    return {
-      ...bounds,
-      left: SECONDARY_TOP_LEFT_WORKER_BOUNDS.left,
-      top: SECONDARY_TOP_LEFT_WORKER_BOUNDS.top
-    };
-  }
-
-  return bounds;
-}
-
 function formatBounds(bounds) {
   return `${bounds.left},${bounds.top},${bounds.width}x${bounds.height}`;
 }
 
 async function createWorkerWindow(url) {
   const bounds = await getWorkerWindowBounds();
+  lastKnownWorkerBounds = { ...bounds };
   const workerWindow = await extensionApi.windows.create({
     url,
-    type: "normal",
+    type: "popup",
     focused: true,
+    left: bounds.left,
+    top: bounds.top,
     width: bounds.width,
     height: bounds.height
   });
@@ -1282,6 +1250,8 @@ async function forceWorkerWindowBounds(windowId, bounds) {
     height: bounds.height,
     focused: true
   });
+
+  lastKnownWorkerBounds = { ...bounds };
 }
 
 async function waitForTabComplete(tabId, timeoutMs) {
@@ -1958,6 +1928,11 @@ extensionApi.tabs.onCreated.addListener((tab) => {
 extensionApi.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   muteWorkerTabIfNeeded(tabId, changeInfo.url || (tab && tab.url)).catch(console.error);
 });
+
+// Removed: onRemoved listener was overwriting correctly saved positions
+// with stale lastKnownWorkerBounds (creation-time bounds, not actual position).
+// Position saving is handled by rememberWorkerWindowBounds (queue transitions)
+// and saveCurrentWorkerWindowBounds (popup "Save window" button).
 
 extensionApi.runtime.onMessage.addListener((message) => {
   return handleRuntimeMessage(message);

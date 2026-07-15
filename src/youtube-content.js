@@ -1,6 +1,6 @@
 "use strict";
 
-const WORKER_WINDOW_BOUNDS = {
+const DEFAULT_WORKER_WINDOW_BOUNDS = {
   left: 2176,
   top: 144,
   width: 1280,
@@ -62,15 +62,19 @@ const VIDEO_CONTAINERS_SELECTOR = [
   "ytd-radio-renderer"
 ].join(",");
 
-const WORKER_WINDOW_FEATURES = [
-  "popup=yes",
-  "noopener",
-  "noreferrer",
-  `left=${WORKER_WINDOW_BOUNDS.left}`,
-  `top=${WORKER_WINDOW_BOUNDS.top}`,
-  `width=${WORKER_WINDOW_BOUNDS.width}`,
-  `height=${WORKER_WINDOW_BOUNDS.height}`
-].join(",");
+let workerWindowBounds = { ...DEFAULT_WORKER_WINDOW_BOUNDS };
+
+function buildWorkerWindowFeatures(bounds) {
+  return [
+    "popup=yes",
+    "noopener",
+    "noreferrer",
+    `left=${bounds.left}`,
+    `top=${bounds.top}`,
+    `width=${bounds.width}`,
+    `height=${bounds.height}`
+  ].join(",");
+}
 
 let lastMenuVideoUrl = null;
 let lastMenuVideoTitle = "";
@@ -79,6 +83,18 @@ let pendingOpenedWorkerUrl = null;
 let canOpenWorkerWindow = true;
 
 const extensionApi = getExtensionApi();
+
+extensionApi.storage.local.get("workerWindowBounds").then((result) => {
+  const saved = result.workerWindowBounds;
+  if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
+    workerWindowBounds = {
+      left: saved.left,
+      top: saved.top,
+      width: saved.width || DEFAULT_WORKER_WINDOW_BOUNDS.width,
+      height: saved.height || DEFAULT_WORKER_WINDOW_BOUNDS.height
+    };
+  }
+}).catch(() => {});
 
 const MONTHS = {
   jan: 0,
@@ -912,7 +928,7 @@ function openWorkerWindow(workerUrl) {
   }
 
   try {
-    return window.open(workerUrl, `ytwm-worker-${Date.now()}`, WORKER_WINDOW_FEATURES);
+    return window.open(workerUrl, `ytwm-worker-${Date.now()}`, buildWorkerWindowFeatures(workerWindowBounds));
   } catch {
     return null;
   }
