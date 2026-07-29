@@ -12,6 +12,7 @@ const workerMode = document.getElementById("workerMode");
 const playbackSeconds = document.getElementById("playbackSeconds");
 const seekFromEndSeconds = document.getElementById("seekFromEndSeconds");
 const maxQueueSize = document.getElementById("maxQueueSize");
+const enableOnWatchlistPlaylists = document.getElementById("enableOnWatchlistPlaylists");
 const windowBounds = document.getElementById("windowBounds");
 const channelStartDate = document.getElementById("channelStartDate");
 const channelEndDate = document.getElementById("channelEndDate");
@@ -440,6 +441,7 @@ function applySettings(settings) {
   playbackSeconds.value = settings.playbackSeconds || 5;
   seekFromEndSeconds.value = settings.seekFromEndSeconds || 30;
   maxQueueSize.value = settings.maxQueueSize || 20;
+  enableOnWatchlistPlaylists.checked = settings.enableOnWatchlistPlaylists !== false;
   pauseButton.textContent = settings.queuePaused ? "Resume queue" : "Pause queue";
   windowBounds.textContent = formatWindowBounds(settings.workerWindowBounds);
   renderQueue(currentQueue);
@@ -559,6 +561,11 @@ maxQueueSize.addEventListener("change", async () => {
   });
 });
 
+enableOnWatchlistPlaylists.addEventListener("change", async () => {
+  await updateSettings({
+    enableOnWatchlistPlaylists: enableOnWatchlistPlaylists.checked
+  });
+});
 
 pauseButton.addEventListener("click", async () => {
   await updateSettings({

@@ -81,6 +81,7 @@ let lastMenuVideoTitle = "";
 let pendingOpenedWorkerWindow = null;
 let pendingOpenedWorkerUrl = null;
 let canOpenWorkerWindow = true;
+let enableOnWatchlistPlaylists = true;
 
 const extensionApi = getExtensionApi();
 
@@ -136,6 +137,9 @@ const MONTHS = {
 };
 
 function updateDirectOpenState(state) {
+  if (state) {
+    enableOnWatchlistPlaylists = state.enableOnWatchlistPlaylists !== false;
+  }
   canOpenWorkerWindow = Boolean(
     state &&
     !state.hasActiveWorker &&
@@ -855,6 +859,7 @@ function findVideoUrlFromEvent(event) {
 }
 
 function rememberMenuTarget(event) {
+  if (!enableOnWatchlistPlaylists && isWatchlistOrPlaylistPage()) return;
   const path = typeof event.composedPath === "function" ? event.composedPath() : [];
   const clickedMenu = path.some((node) => (
     node &&
@@ -998,6 +1003,10 @@ async function enqueueDirectOpen(url, title) {
   return response;
 }
 
+function isWatchlistOrPlaylistPage() {
+  return /[?&]list=|\/playlist\//.test(window.location.href);
+}
+
 function closeYouTubeMenu() {
   const escapeEvent = new KeyboardEvent("keydown", {
     key: "Escape",
@@ -1022,6 +1031,10 @@ function closeYouTubeMenu() {
 }
 
 function handleWatchedClick() {
+  if (!enableOnWatchlistPlaylists && isWatchlistOrPlaylistPage()) {
+    closeYouTubeMenu();
+    return;
+  }
   const url = lastMenuVideoUrl || getFallbackVideoUrl();
   const title = lastMenuVideoTitle || document.title.replace(/ - YouTube$/, "").trim();
   if (!url) {
@@ -1044,6 +1057,7 @@ document.addEventListener('pointerdown', (e) => {
   if (!item) return;
   if (!item.textContent.includes(WATCHED_ITEM_TEXT)) return;
   if (!canOpenWorkerWindow) return;
+  if (!enableOnWatchlistPlaylists && isWatchlistOrPlaylistPage()) return;
   const url = lastMenuVideoUrl || getFallbackVideoUrl();
   if (!url) return;
   const workerUrl = buildWorkerUrl(url);

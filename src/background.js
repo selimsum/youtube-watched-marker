@@ -11,6 +11,7 @@ const SEEK_FROM_END_SECONDS_KEY = "seekFromEndSeconds";
 const QUEUE_PAUSED_KEY = "queuePaused";
 const MAX_QUEUE_SIZE_KEY = "maxQueueSize";
 const WAITING_FOR_DIRECT_OPEN_KEY = "waitingForDirectOpen";
+const ENABLE_ON_WATCHLIST_PLAYLISTS_KEY = "enableOnWatchlistPlaylists";
 const VIDEO_ID_PATTERN = /^[a-zA-Z0-9_-]{11}$/;
 const DEFAULT_PLAYBACK_SECONDS = 5;
 const DEFAULT_SEEK_FROM_END_SECONDS = 30;
@@ -28,6 +29,7 @@ const DEFAULT_WORKER_WINDOW_BOUNDS = {
   height: 720
 };
 const DEFAULT_WORKER_MODE = "window";
+const DEFAULT_ENABLE_ON_WATCHLIST_PLAYLISTS = true;
 
 let activeWorker = null;
 let retainedWorker = null;
@@ -127,7 +129,8 @@ async function getSettings() {
     SEEK_FROM_END_SECONDS_KEY,
     QUEUE_PAUSED_KEY,
     MAX_QUEUE_SIZE_KEY,
-    WAITING_FOR_DIRECT_OPEN_KEY
+    WAITING_FOR_DIRECT_OPEN_KEY,
+    ENABLE_ON_WATCHLIST_PLAYLISTS_KEY
   ]);
 
   return {
@@ -156,7 +159,10 @@ async function getSettings() {
     ),
     waitingForDirectOpen: typeof result[WAITING_FOR_DIRECT_OPEN_KEY] === "boolean"
       ? result[WAITING_FOR_DIRECT_OPEN_KEY]
-      : false
+      : false,
+    enableOnWatchlistPlaylists: typeof result[ENABLE_ON_WATCHLIST_PLAYLISTS_KEY] === "boolean"
+      ? result[ENABLE_ON_WATCHLIST_PLAYLISTS_KEY]
+      : DEFAULT_ENABLE_ON_WATCHLIST_PLAYLISTS
   };
 }
 
@@ -216,6 +222,10 @@ async function updateSettings(patch) {
 
   if (Object.prototype.hasOwnProperty.call(patch, "waitingForDirectOpen")) {
     nextValues[WAITING_FOR_DIRECT_OPEN_KEY] = Boolean(patch.waitingForDirectOpen);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(patch, "enableOnWatchlistPlaylists")) {
+    nextValues[ENABLE_ON_WATCHLIST_PLAYLISTS_KEY] = Boolean(patch.enableOnWatchlistPlaylists);
   }
 
   if (Object.keys(nextValues).length) {
@@ -668,7 +678,8 @@ async function notifyContentQueueState() {
     activeCount: getActiveQueueCount(queue),
     hasActiveWorker: Boolean(activeWorker || retainedWorker),
     queuePaused: settings.queuePaused,
-    waitingForDirectOpen: settings.waitingForDirectOpen
+    waitingForDirectOpen: settings.waitingForDirectOpen,
+    enableOnWatchlistPlaylists: settings.enableOnWatchlistPlaylists
   };
   const tabs = await extensionApi.tabs.query({
     url: [
