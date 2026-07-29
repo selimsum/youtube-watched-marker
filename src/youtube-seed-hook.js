@@ -1,10 +1,6 @@
 "use strict";
 
 (function hookBody() {
-    if (window.__ytwmDisableOnPlaylist) {
-      console.log("ytwm: disabled on watchlist/playlist page");
-      return;
-    }
     console.log("ytwm: hookBody running");
     var WATCHED_TEXT = "Mark as watched";
     var VIDEO_TYPES = ["videoRenderer","compactVideoRenderer","gridVideoRenderer","movieRenderer","compactMovieRenderer","reelItemRenderer","playlistVideoRenderer","compactPlaylistVideoRenderer","channelVideoPlayerRenderer","radioRenderer"];
