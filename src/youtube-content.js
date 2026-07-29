@@ -244,8 +244,23 @@ async function scanChannelTimeframe(range) {
   };
 }
 
+function getChannelVideoGridRoot() {
+  const grid = document.querySelector("ytd-rich-grid-renderer");
+  if (grid) return grid;
+
+  const section = document.querySelector("ytd-item-section-renderer");
+  if (section) return section;
+
+  const primary = document.querySelector("#primary");
+  if (primary) return primary;
+
+  return document.documentElement;
+}
+
 function collectChannelVideos(videosById, unparseableVideoIds, pageDataDates) {
-  for (const container of getVideoContainers(document.documentElement)) {
+  const root = getChannelVideoGridRoot();
+
+  for (const container of getVideoContainers(root)) {
     const url = findVideoUrlInContainer(container);
     const videoId = getVideoIdFromUrl(url);
 
