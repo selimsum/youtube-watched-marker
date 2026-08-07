@@ -11,7 +11,6 @@ const SEEK_FROM_END_SECONDS_KEY = "seekFromEndSeconds";
 const QUEUE_PAUSED_KEY = "queuePaused";
 const MAX_QUEUE_SIZE_KEY = "maxQueueSize";
 const WAITING_FOR_DIRECT_OPEN_KEY = "waitingForDirectOpen";
-const VIDEO_ID_PATTERN = /^[a-zA-Z0-9_-]{11}$/;
 const DEFAULT_PLAYBACK_SECONDS = 5;
 const DEFAULT_SEEK_FROM_END_SECONDS = 30;
 const DEFAULT_QUEUE_PAUSED = false;
@@ -21,12 +20,6 @@ const WORKER_TIMEOUT_MS = 90000;
 const WORKER_TIMEOUT_BASE_MS = 35000;
 const WORKER_TIMEOUT_BUFFER_MS = 15000;
 const MAX_DEBUG_EVENTS = 80;
-const DEFAULT_WORKER_WINDOW_BOUNDS = {
-  left: 2176,
-  top: 144,
-  width: 1280,
-  height: 720
-};
 const DEFAULT_WORKER_MODE = "window";
 
 let activeWorker = null;
@@ -34,53 +27,6 @@ let retainedWorker = null;
 let lastKnownWorkerBounds = null;
 
 const extensionApi = getExtensionApi();
-
-function normalizeUrl(value) {
-  if (!value || typeof value !== "string") {
-    return null;
-  }
-
-  try {
-    return new URL(value);
-  } catch {
-    return null;
-  }
-}
-
-function cleanVideoId(value) {
-  if (!value) {
-    return null;
-  }
-
-  const trimmed = String(value).trim();
-  return VIDEO_ID_PATTERN.test(trimmed) ? trimmed : null;
-}
-
-function extractVideoIdFromUrl(rawUrl) {
-  const url = normalizeUrl(rawUrl);
-
-  if (!url || !isYouTubeHost(url.hostname)) {
-    return null;
-  }
-
-  if (url.hostname.toLowerCase() === "youtu.be") {
-    return cleanVideoId(url.pathname.split("/").filter(Boolean)[0]);
-  }
-
-  const watchId = cleanVideoId(url.searchParams.get("v"));
-  if (watchId) {
-    return watchId;
-  }
-
-  const parts = url.pathname.split("/").filter(Boolean);
-  const firstPart = parts[0] ? parts[0].toLowerCase() : "";
-
-  if (["shorts", "embed", "live"].includes(firstPart)) {
-    return cleanVideoId(parts[1]);
-  }
-
-  return null;
-}
 
 function getCandidateUrls(info, tab) {
   return [
@@ -599,15 +545,6 @@ async function updateQueueItem(itemId, patch, event = null) {
   return updatedItem;
 }
 
-function buildWatchUrl(videoId) {
-  const url = new URL("https://www.youtube.com/watch");
-  url.searchParams.set("v", videoId);
-  url.searchParams.set("ytwm_worker", "1");
-  url.searchParams.set("mute", "1");
-  url.searchParams.set("autoplay", "0");
-  return url.toString();
-}
-
 function isWorkerWatchUrl(url) {
   const parsedUrl = normalizeUrl(url);
 
@@ -1013,7 +950,7 @@ async function stopWorkerPlaybackQuietly(tabId) {
 
   try {
     await extensionApi.tabs.executeScript(tabId, {
-      code: "for (const video of document.querySelectorAll('video')) { try { video.pause(); video.currentTime = video.currentTime; } catch {} }",
+      file: "src/stop-videos.js",
       runAt: "document_idle"
     });
   } catch {
@@ -1469,20 +1406,24 @@ function resolveActiveWorker(result) {
 }
 
 
-function getPlaybackModeForStatus(status) {
-  if (status === "hidden-playback-confirmed") {
-    return "hidden";
-  }
+function getStatusPlaybackMode(status) {
+  let mode;
 
-  if (
+  if (status === "hidden-playback-confirmed") {
+    mode = "hidden";
+  } else if (
     status === "foreground-assist-started" ||
     status === "foreground-assist-releasing" ||
     status === "foreground-playback-confirmed"
   ) {
-    return "foreground-assisted";
+    mode = "foreground-assisted";
   }
 
-  return undefined;
+  if (mode) {
+    handlePlaybackModeChange(mode);
+  }
+
+  return mode;
 }
 
 function getPlaybackModeFromResult(result) {
@@ -1517,16 +1458,6 @@ function handlePlaybackModeChange(mode) {
   }
 
   activeWorker.playbackMode = mode;
-}
-
-function getStatusPlaybackMode(status) {
-  const mode = getPlaybackModeForStatus(status);
-
-  if (mode) {
-    handlePlaybackModeChange(mode);
-  }
-
-  return mode;
 }
 
 async function getActiveTab() {
@@ -1942,12 +1873,3 @@ registerContextMenu();
 resetStaleRunningItems()
   .then(() => processQueue())
   .catch(console.error);
-
-if (typeof module !== "undefined") {
-  var { isYouTubeHost } = require("./utils/youtube");
-  module.exports = {
-    cleanVideoId,
-    extractVideoIdFromUrl,
-    isYouTubeHost
-  };
-}

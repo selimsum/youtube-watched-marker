@@ -1,7 +1,20 @@
 "use strict";
 
 (function hookBody() {
-    console.log("ytwm: hookBody running");
+    var DEBUG = false;
+
+    function debugLog() {
+      if (DEBUG) {
+        console.log.apply(console, arguments);
+      }
+    }
+
+    function debugError() {
+      if (DEBUG) {
+        console.error.apply(console, arguments);
+      }
+    }
+
     var WATCHED_TEXT = "Mark as watched";
     var VIDEO_TYPES = ["videoRenderer","compactVideoRenderer","gridVideoRenderer","movieRenderer","compactMovieRenderer","reelItemRenderer","playlistVideoRenderer","compactPlaylistVideoRenderer","channelVideoPlayerRenderer","radioRenderer"];
 
@@ -20,7 +33,7 @@
       if (items[0] && items[0].menuServiceItemRenderer) {
         items.push({menuServiceItemRenderer:{text:{runs:[{text:WATCHED_TEXT}]},icon:{iconType:"CHECK"},trackingParams:"Cg==",serviceEndpoint:{commandMetadata:{webCommandMetadata:{sendPost:false,apiUrl:""}}}}});
       } else if (items[0] && items[0].listItemViewModel) {
-        console.log("ytwm: injecting listItemViewModel into sheet menu");
+        debugLog("ytwm: injecting listItemViewModel into sheet menu");
         var baseCtx = items[0].listItemViewModel.rendererContext;
         var newItem = {listItemViewModel:{title:{content:WATCHED_TEXT},leadingImage:{sources:[{clientResource:{imageName:"CHECK"}}]}}};
         if (baseCtx) newItem.listItemViewModel.rendererContext = JSON.parse(JSON.stringify(baseCtx));
@@ -48,7 +61,7 @@
         cur = cur && cur.inlineContent && cur.inlineContent.sheetViewModel;
         cur = cur && cur.content && cur.content.listViewModel;
         if (cur && Array.isArray(cur.listItems)) {
-          console.log("ytwm: lockupViewModel direct handler hit, listItems length:", cur.listItems.length);
+          debugLog("ytwm: lockupViewModel direct handler hit, listItems length:", cur.listItems.length);
           injectItem(cur.listItems);
         }
       }
@@ -69,13 +82,13 @@
     }
 
     function modify(js) {
-      console.log("ytwm: modify called", js && typeof js, Array.isArray(js));
+      debugLog("ytwm: modify called", js && typeof js, Array.isArray(js));
       injectInto(js, new WeakSet());
     }
     // Inject into ytInitialData right now if it already exists
     if (window.ytInitialData) {
-      console.log("ytwm: ytInitialData already set, injecting now");
-      try { modify(window.ytInitialData); } catch(e) { console.error("ytwm: error", e); }
+      debugLog("ytwm: ytInitialData already set, injecting now");
+      try { modify(window.ytInitialData); } catch(e) { debugError("ytwm: error", e); }
     }
 
     // Intercept ytInitialData being set on window
@@ -131,5 +144,5 @@
       }
       return _send.apply(this, arguments);
     };
-    console.log("ytwm: hookBody done");
+    debugLog("ytwm: hookBody done");
 })();

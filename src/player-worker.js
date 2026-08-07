@@ -415,8 +415,8 @@
     }
 
     if (!await waitForPlaybackProgress(video, 8000)) {
-        await releaseFocusAssist();
-        throw createPlaybackAssistError(video);
+      await releaseFocusAssist();
+      throw createPlaybackAssistError(video);
     }
 
     await reportStatus(itemId, "foreground-playback-confirmed");

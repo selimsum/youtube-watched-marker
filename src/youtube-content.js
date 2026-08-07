@@ -1,20 +1,15 @@
 "use strict";
 
-const DEFAULT_WORKER_WINDOW_BOUNDS = {
-  left: 2176,
-  top: 144,
-  width: 1280,
-  height: 720
-};
 const CHANNEL_SCAN_MAX_SCROLLS = 120;
 const CHANNEL_SCAN_STABLE_SCROLLS = 4;
 const CHANNEL_SCAN_RECENT_OLDER_COUNT = 8;
+const SHEET_WIDTH_PX = 240;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-// Widen contextual sheets to prevent text wrapping (bokblock interaction)
+// Widen contextual sheets to prevent text wrapping (blockbox interaction)
 (function() {
   var s = document.createElement('script');
-  s.textContent = 'window.__ytwmSheetWidth=function(w){var st=document.getElementById("ytwm-sheet-style")||document.createElement("style");st.id="ytwm-sheet-style";st.textContent=w?"tp-yt-iron-dropdown{min-width:"+w+"px!important;width:auto!important}yt-sheet-view-model{min-width:"+w+"px!important;width:auto!important}yt-contextual-sheet-layout{min-width:"+w+"px!important;width:auto!important}yt-contextual-sheet-layout yt-list-view-model{min-width:"+(w-10)+"px!important}yt-contextual-sheet-layout yt-list-item-view-model{min-width:"+(w-10)+"px!important}":"";if(w){document.documentElement.appendChild(st)}else{st.remove()}};window.__ytwmSheetWidth(240)';
+  s.textContent = 'window.__ytwmSheetWidth=function(w){var st=document.getElementById("ytwm-sheet-style")||document.createElement("style");st.id="ytwm-sheet-style";st.textContent=w?"tp-yt-iron-dropdown{min-width:"+w+"px!important;width:auto!important}yt-sheet-view-model{min-width:"+w+"px!important;width:auto!important}yt-contextual-sheet-layout{min-width:"+w+"px!important;width:auto!important}yt-contextual-sheet-layout yt-list-view-model{min-width:"+(w-10)+"px!important}yt-contextual-sheet-layout yt-list-item-view-model{min-width:"+(w-10)+"px!important}":"";if(w){document.documentElement.appendChild(st)}else{st.remove()}};window.__ytwmSheetWidth(' + SHEET_WIDTH_PX + ')';
   document.documentElement.appendChild(s);
   s.remove();
 })();
@@ -904,37 +899,6 @@ function getFallbackVideoUrl() {
   }
 
   return null;
-}
-
-function getVideoIdFromUrl(rawUrl) {
-  try {
-    const url = new URL(rawUrl);
-    const watchId = url.searchParams.get("v");
-
-    if (watchId) {
-      return watchId;
-    }
-
-    const parts = url.pathname.split("/").filter(Boolean);
-    if (["shorts", "embed", "live"].includes(parts[0])) {
-      return parts[1] || null;
-    }
-  } catch {}
-
-  return null;
-}
-
-function buildWorkerUrl(rawUrl) {
-  const videoId = getVideoIdFromUrl(rawUrl);
-
-  if (!videoId) {
-    return null;
-  }
-
-  const url = new URL("https://www.youtube.com/watch");
-  url.searchParams.set("v", videoId);
-  url.searchParams.set("ytwm_worker", "1");
-  return url.toString();
 }
 
 function openWorkerWindow(workerUrl) {
