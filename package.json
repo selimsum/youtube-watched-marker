@@ -1,6 +1,6 @@
 {
   "name": "youtube-watched-marker",
-  "version": "0.1.29",
+  "version": "0.1.31",
   "private": true,
   "description": "Firefox-first WebExtension for queueing YouTube™ videos and simulating watched playback.",
   "homepage": "https://github.com/selimsum/youtube-watched-marker",

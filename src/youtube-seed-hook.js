@@ -15,8 +15,101 @@
       }
     }
 
+    if (location.search.indexOf("ytwm_worker=1") !== -1) {
+      function forceMutedAutoplay(video) {
+        if (!video || video._ytwmMuted) return;
+        video._ytwmMuted = true;
+        video.muted = true;
+        video.setAttribute("muted", "");
+        video.volume = 0;
+      }
+      (new MutationObserver(function(mutations) {
+        for (var i = 0; i < mutations.length; i++) {
+          var nodes = mutations[i].addedNodes;
+          for (var j = 0; j < nodes.length; j++) {
+            var n = nodes[j];
+            if (n.nodeName === "VIDEO") forceMutedAutoplay(n);
+            if (n.querySelectorAll) {
+              var vids = n.querySelectorAll("video");
+              for (var k = 0; k < vids.length; k++) forceMutedAutoplay(vids[k]);
+            }
+          }
+        }
+      })).observe(document.documentElement, { childList: true, subtree: true });
+      document.addEventListener("play", function(e) {
+        if (e.target && e.target.nodeName === "VIDEO") forceMutedAutoplay(e.target);
+      }, true);
+      var _origPlay = HTMLVideoElement.prototype.play;
+      HTMLVideoElement.prototype.play = function() {
+        forceMutedAutoplay(this);
+        return _origPlay.apply(this, arguments);
+      };
+    }
+
     var WATCHED_TEXT = "Mark as watched";
     var VIDEO_TYPES = ["videoRenderer","compactVideoRenderer","gridVideoRenderer","movieRenderer","compactMovieRenderer","reelItemRenderer","playlistVideoRenderer","compactPlaylistVideoRenderer","channelVideoPlayerRenderer","radioRenderer"];
+
+    function isSelectionMenu(items) {
+      if (!Array.isArray(items)) return false;
+      for (var si = 0; si < items.length; si++) {
+        var entry = items[si];
+        if (!entry || typeof entry !== "object") continue;
+        var vm = entry.menuServiceItemRenderer || entry.listItemViewModel || entry;
+        if (entry.selected === true || entry.isSelected === true) return true;
+        if (vm.selected === true || vm.isSelected === true) return true;
+        if (vm.selectionState || vm.selectionIndicator || vm.trailingSelectedImage) return true;
+        // New UI sort/selection sheets mark the active option via trailing check
+        // image or selection state; video action sheets never carry those.
+        if (vm.trailingImage && vm.title && vm.leadingImage) {
+          try {
+            var trailing = JSON.stringify(vm.trailingImage).toLowerCase();
+            if (trailing.indexOf("check") !== -1 || trailing.indexOf("select") !== -1) return true;
+          } catch (e) {}
+        }
+        try {
+          var cmdText = JSON.stringify(
+            (vm.rendererContext && vm.rendererContext.commandContext) || vm.onTap || entry.onTap || ""
+          ).toLowerCase();
+          if (cmdText.indexOf("sort") !== -1 || cmdText.indexOf("filter") !== -1) return true;
+        } catch (e2) {}
+      }
+      return false;
+    }
+
+    function parentHasVideoSignal(obj) {
+      if (!obj || typeof obj !== "object") return false;
+      if (typeof obj.videoId === "string" && obj.videoId.length >= 6) return true;
+      if (typeof obj.contentId === "string" && obj.contentId.length >= 6) return true;
+      if (obj.watchEndpoint) return true;
+      return false;
+    }
+
+    function lockupHasVideoSignal(lockup) {
+      if (!lockup || typeof lockup !== "object") return false;
+      if (parentHasVideoSignal(lockup)) return true;
+      try {
+        var stack = [lockup];
+        var seen = new WeakSet();
+        var depth = [0];
+        while (stack.length > 0) {
+          var cur = stack.pop();
+          var d = depth.pop();
+          if (!cur || typeof cur !== "object" || seen.has(cur) || d > 4) continue;
+          seen.add(cur);
+          if (cur.videoId || cur.watchEndpoint) return true;
+          if (typeof cur.contentId === "string" && cur.contentId.length >= 6) return true;
+          var ks = Object.keys(cur);
+          for (var ki = 0; ki < ks.length; ki++) {
+            var cv = cur[ks[ki]];
+            if (cv && typeof cv === "object") {
+              stack.push(cv);
+              depth.push(d + 1);
+            }
+          }
+        }
+      } catch (e) {}
+      return false;
+    }
 
     function injectItem(items) {
       if (!Array.isArray(items)) return;
@@ -41,16 +134,17 @@
       }
     }
 
-    function injectInto(val, visited) {
+    function injectInto(val, visited, inVideoContext) {
       if (!val || typeof val !== "object" || visited.has(val)) return;
       visited.add(val);
 
-      // Direct checks for known menu locations
-      if (val.commentRenderer && val.commentRenderer.actionMenu && val.commentRenderer.actionMenu.menuRenderer && Array.isArray(val.commentRenderer.actionMenu.menuRenderer.items)) {
-        injectItem(val.commentRenderer.actionMenu.menuRenderer.items);
-      }
+      // Direct checks for known video menu locations only.
+      // NOTE: comment menus and playlist "Sort by" sheets are intentionally
+      // excluded — they are not tied to a single video.
       if (val.videoActions && val.videoActions.menuRenderer && Array.isArray(val.videoActions.menuRenderer.items)) {
-        injectItem(val.videoActions.menuRenderer.items);
+        if (!isSelectionMenu(val.videoActions.menuRenderer.items)) {
+          injectItem(val.videoActions.menuRenderer.items);
+        }
       }
       if (val.lockupViewModel) {
         var cur = val.lockupViewModel;
@@ -62,22 +156,31 @@
         cur = cur && cur.content && cur.content.listViewModel;
         if (cur && Array.isArray(cur.listItems)) {
           debugLog("ytwm: lockupViewModel direct handler hit, listItems length:", cur.listItems.length);
-          injectItem(cur.listItems);
+          if (!isSelectionMenu(cur.listItems) && lockupHasVideoSignal(val.lockupViewModel)) {
+            injectItem(cur.listItems);
+          }
         }
       }
 
-      // Generic: find ANY items array with menuServiceItemRenderer that we can inject into
+      // Generic fallback: only inject inside video renderer subtrees.
+      // The playlist "Sort by" sheet lives outside any video renderer, so it
+      // is skipped here even though it uses the same item renderer types.
+      var childVideoContext = Boolean(inVideoContext) || parentHasVideoSignal(val);
       var keys = Object.keys(val);
       for (var k = 0; k < keys.length; k++) {
-        var child = val[keys[k]];
+        var key = keys[k];
+        var child = val[key];
+        var keyVideoContext = childVideoContext ||
+          VIDEO_TYPES.indexOf(key) !== -1 ||
+          (key === "lockupViewModel" && lockupHasVideoSignal(child));
         if (Array.isArray(child) && child.length > 0) {
           var isMenu = false;
           for (var ci = 0; ci < child.length && ci < 3; ci++) {
             if (child[ci] && (child[ci].menuServiceItemRenderer || child[ci].listItemViewModel)) { isMenu = true; break; }
           }
-          if (isMenu) injectItem(child);
+          if (isMenu && keyVideoContext && !isSelectionMenu(child)) injectItem(child);
         }
-        if (child && typeof child === "object") injectInto(child, visited);
+        if (child && typeof child === "object") injectInto(child, visited, keyVideoContext);
       }
     }
 
