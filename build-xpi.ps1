@@ -13,7 +13,7 @@ if (-not (Test-Path "node_modules\.bin\web-ext.cmd")) {
 
 # Lint first
 Write-Host "Linting..." -ForegroundColor Cyan
-& npx web-ext lint --source-dir . --ignore-files package.json package-lock.json node_modules web-ext-artifacts README.md
+& npx web-ext lint --source-dir . --ignore-files package.json package-lock.json node_modules web-ext-artifacts build-xpi.ps1 README.md PRIVACY.md
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Lint failed!" -ForegroundColor Red
     exit 1
@@ -21,7 +21,7 @@ if ($LASTEXITCODE -ne 0) {
 
 # Build zip
 Write-Host "Building..." -ForegroundColor Cyan
-& npx web-ext build --source-dir . --artifacts-dir $artifactsDir --overwrite-dest --ignore-files package.json package-lock.json node_modules web-ext-artifacts README.md
+& npx web-ext build --source-dir . --artifacts-dir $artifactsDir --overwrite-dest --ignore-files package.json package-lock.json node_modules web-ext-artifacts build-xpi.ps1 README.md PRIVACY.md
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Build failed!" -ForegroundColor Red
     exit 1

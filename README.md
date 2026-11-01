@@ -22,7 +22,7 @@ Firefox-first WebExtension for queuing YouTube™ videos and simulating watched 
 - Includes a queue pause/resume control and a configurable active queue limit.
 - Shows a popup warning that marking opens a muted worker browser window while signed in.
 - Includes reset/save buttons for the remembered worker window bounds.
-- Uses a stable Firefox add-on ID: `youtube-watched-marker@example.com`.
+- Uses a stable Firefox add-on ID: `youtube-watched-marker@hayalet`.
 
 ## Load in Firefox
 

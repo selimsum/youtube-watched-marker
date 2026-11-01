@@ -907,7 +907,7 @@ function openWorkerWindow(workerUrl) {
   }
 
   try {
-    return window.open(workerUrl, `ytwm-worker-${Date.now()}`, buildWorkerWindowFeatures(workerWindowBounds));
+    return window.open(workerUrl, "ytwm-worker", buildWorkerWindowFeatures(workerWindowBounds));
   } catch {
     return null;
   }
