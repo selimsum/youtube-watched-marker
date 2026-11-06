@@ -2,6 +2,8 @@
 
 Firefox-first WebExtension for queuing YouTube™ videos and simulating watched playback in a short-lived worker window.
 
+Install from Firefox Add-ons: https://addons.mozilla.org/firefox/addon/youtube-watched-marker/
+
 ## Behavior
 
 - Adds a Firefox context menu item named **Mark as watched** on YouTube™ pages and links.
