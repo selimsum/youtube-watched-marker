@@ -7,7 +7,3 @@ function getExtensionApi() {
 
   return chrome;
 }
-
-if (typeof module !== "undefined" && module.exports) {
-  module.exports = { getExtensionApi };
-}

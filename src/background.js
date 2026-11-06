@@ -16,15 +16,21 @@ const DEFAULT_SEEK_FROM_END_SECONDS = 30;
 const DEFAULT_QUEUE_PAUSED = false;
 const DEFAULT_MAX_QUEUE_SIZE = 20;
 const MAX_QUEUE_SIZE_LIMIT = 500;
-const WORKER_TIMEOUT_MS = 90000;
 const WORKER_TIMEOUT_BASE_MS = 35000;
 const WORKER_TIMEOUT_BUFFER_MS = 15000;
 const MAX_DEBUG_EVENTS = 80;
 const DEFAULT_WORKER_MODE = "window";
+const STOPPED_BY_USER_ERROR = "stopped-by-user";
+const MIN_WORKER_WINDOW_SIZE = 320;
+const MAX_WORKER_WINDOW_SIZE = 3840;
+const PREOPEN_CLAIM_TIMEOUT_MS = 20000;
 
 let activeWorker = null;
 let retainedWorker = null;
 let lastKnownWorkerBounds = null;
+let lastContentQueueStateKey = null;
+let lastWorkerAbortError = null;
+let pendingPreopenedWorker = null;
 
 const extensionApi = getExtensionApi();
 
@@ -60,9 +66,17 @@ function cleanTitle(title) {
   return title.replace(/\s+/g, " ").replace(/ - YouTube$/, "").trim();
 }
 
+let queueCache = null;
+
 async function getQueue() {
+  if (queueCache) {
+    return queueCache;
+  }
+
   const result = await extensionApi.storage.local.get(STORAGE_KEY);
-  return Array.isArray(result[STORAGE_KEY]) ? result[STORAGE_KEY] : [];
+  queueCache = Array.isArray(result[STORAGE_KEY]) ? result[STORAGE_KEY] : [];
+
+  return queueCache;
 }
 
 async function getSettings() {
@@ -78,7 +92,7 @@ async function getSettings() {
 
   return {
     workerMode: result[WORKER_MODE_KEY] || DEFAULT_WORKER_MODE,
-    workerWindowBounds: result[WORKER_WINDOW_BOUNDS_KEY] || DEFAULT_WORKER_WINDOW_BOUNDS,
+    workerWindowBounds: result[WORKER_WINDOW_BOUNDS_KEY] || null,
     playbackSeconds: normalizeSettingNumber(
       result[PLAYBACK_SECONDS_KEY],
       DEFAULT_PLAYBACK_SECONDS,
@@ -104,12 +118,6 @@ async function getSettings() {
       ? result[WAITING_FOR_DIRECT_OPEN_KEY]
       : false
   };
-}
-
-async function setWorkerMode(workerMode) {
-  const nextMode = workerMode === "tab" ? "tab" : "window";
-  await extensionApi.storage.local.set({ [WORKER_MODE_KEY]: nextMode });
-  return nextMode;
 }
 
 function normalizeSettingNumber(value, fallback, minimum, maximum) {
@@ -176,51 +184,148 @@ async function resetWorkerWindowBounds() {
 }
 
 async function setQueue(queue) {
+  queueCache = queue;
   await extensionApi.storage.local.set({ [STORAGE_KEY]: queue });
+}
+
+function beginPreopenWorker(workerUrl) {
+  const previous = pendingPreopenedWorker;
+
+  if (previous) {
+    previous.state = "closed";
+    pendingPreopenedWorker = null;
+
+    if (previous.windowId) {
+      closeWorkerQuietly({
+        windowId: previous.windowId,
+        tabId: previous.tabId
+      }).catch(() => {});
+    }
+  }
+
+  const record = {
+    workerUrl,
+    windowId: null,
+    tabId: null,
+    state: "pending"
+  };
+  pendingPreopenedWorker = record;
+
+  createWorkerWindow(workerUrl)
+    .then((worker) => {
+      record.windowId = worker.windowId;
+      record.tabId = worker.tab && worker.tab.id;
+
+      if (record.state === "closed") {
+        return closeWorkerQuietly({
+          windowId: record.windowId,
+          tabId: record.tabId
+        });
+      }
+    })
+    .catch(() => {});
+
+  // The content script claims or cancels within a few hundred ms of the click;
+  // this only covers a click that never produced an enqueue message.
+  setTimeout(() => {
+    if (record.state === "pending" && pendingPreopenedWorker === record) {
+      closePreopenedWorker().catch(console.error);
+    }
+  }, PREOPEN_CLAIM_TIMEOUT_MS);
+}
+
+async function closePreopenedWorker() {
+  const record = pendingPreopenedWorker;
+
+  if (!record) {
+    return;
+  }
+
+  pendingPreopenedWorker = null;
+  record.state = "closed";
+
+  if (record.windowId) {
+    await closeWorkerQuietly({
+      windowId: record.windowId,
+      tabId: record.tabId
+    });
+  }
+}
+
+function claimPreopenedWorker(workerUrl) {
+  const record = pendingPreopenedWorker;
+
+  if (!record || record.workerUrl !== workerUrl) {
+    return;
+  }
+
+  pendingPreopenedWorker = null;
+  record.state = "claimed";
 }
 
 async function enqueueVideo(videoId, sourceUrl, title, extra) {
   const queue = await getQueue();
+  const workerUrl = (extra && extra.openedWorkerUrl) || null;
   const existingActive = queue.find(
     (item) => (
       item.videoId === videoId &&
       ["pending", "running"].includes(item.status)
     )
   );
+  const settings = await getSettings();
+  const limitReached = (
+    !existingActive &&
+    getActiveQueueCount(queue) >= settings.maxQueueSize
+  );
 
-  if (existingActive) {
-    if (extra && extra.openedWorkerUrl) {
-      const updatedItem = await updateQueueItem(existingActive.id, {
-        openedWorkerUrl: extra.openedWorkerUrl,
-        targetWorkerUrl: extra.targetWorkerUrl || null,
-        workerStatus: null
-      });
-      await extensionApi.storage.local.set({
-        [WAITING_FOR_DIRECT_OPEN_KEY]: false
-      });
+  // Only a pending item still reaches setupWorker, so only a pending item can
+  // adopt the worker window the content script asked us to preopen. Anything
+  // else leaves that window orphaned, so close it here instead.
+  const adoptsWorker = Boolean(workerUrl) &&
+    !limitReached &&
+    (!existingActive || existingActive.status === "pending");
 
-      return {
-        item: updatedItem || existingActive,
-        ok: true,
-        created: false
-      };
+  if (workerUrl) {
+    if (adoptsWorker) {
+      claimPreopenedWorker(workerUrl);
+    } else {
+      await closePreopenedWorker();
     }
-
-    return {
-      item: existingActive,
-      ok: true,
-      created: false
-    };
   }
 
-  const settings = await getSettings();
-  const activeCount = getActiveQueueCount(queue);
-
-  if (activeCount >= settings.maxQueueSize) {
+  if (limitReached) {
     return {
       ok: false,
       error: "queue-limit-reached",
-      maxQueueSize: settings.maxQueueSize
+      maxQueueSize: settings.maxQueueSize,
+      closeOpenedWorker: Boolean(workerUrl)
+    };
+  }
+
+  if (existingActive) {
+    if (!adoptsWorker) {
+      return {
+        item: existingActive,
+        ok: true,
+        created: false,
+        closeOpenedWorker: Boolean(workerUrl)
+      };
+    }
+
+    const updatedItem = await updateQueueItem(existingActive.id, {
+      openedWorkerUrl: workerUrl,
+      targetWorkerUrl: extra.targetWorkerUrl || null,
+      workerStatus: null
+    });
+    await extensionApi.storage.local.set({
+      [WAITING_FOR_DIRECT_OPEN_KEY]: false
+    });
+
+    return {
+      item: updatedItem || existingActive,
+      ok: true,
+      created: false,
+      closeOpenedWorker: false
     };
   }
 
@@ -228,7 +333,7 @@ async function enqueueVideo(videoId, sourceUrl, title, extra) {
   queue.push(item);
   await setQueue(queue);
 
-  if (extra && extra.openedWorkerUrl) {
+  if (workerUrl) {
     await extensionApi.storage.local.set({
       [WAITING_FOR_DIRECT_OPEN_KEY]: false
     });
@@ -237,7 +342,8 @@ async function enqueueVideo(videoId, sourceUrl, title, extra) {
   return {
     item,
     ok: true,
-    created: true
+    created: true,
+    closeOpenedWorker: false
   };
 }
 
@@ -323,10 +429,8 @@ function getActiveQueueCount(queue) {
 }
 
 async function clearQueue() {
-  if (activeWorker) {
-    await closeWorkerQuietly(activeWorker);
-    activeWorker = null;
-  }
+  await abortActiveWorker(new Error("queue-cleared"));
+  await closePreopenedWorker();
 
   if (retainedWorker) {
     await closeWorkerQuietly(retainedWorker);
@@ -341,8 +445,7 @@ async function removeQueueItem(itemId) {
   const item = queue.find((entry) => entry.id === itemId);
 
   if (item && activeWorker && activeWorker.itemId === item.id) {
-    await closeWorkerQuietly(activeWorker);
-    activeWorker = null;
+    await abortActiveWorker(new Error("removed-by-user"));
   }
 
   await setQueue(queue.filter((entry) => entry.id !== itemId));
@@ -428,21 +531,31 @@ async function clearQueueByStatus(status) {
   return nextQueue;
 }
 
+async function abortActiveWorker(error) {
+  const worker = activeWorker;
+
+  if (!worker) {
+    return;
+  }
+
+  activeWorker = null;
+  lastWorkerAbortError = error;
+  rejectWorker(worker, error);
+  await closeWorkerQuietly(worker);
+}
+
 async function stopCurrentWorker() {
   if (!activeWorker && !retainedWorker) {
     return false;
   }
 
-  if (activeWorker) {
-    const itemId = activeWorker.itemId;
-    await closeWorkerQuietly(activeWorker);
-    activeWorker = null;
-    await updateQueueItem(itemId, {
-      status: "failed",
-      completedAt: new Date().toISOString(),
-      error: "stopped-by-user"
-    });
-  }
+  // Pause before aborting. runQueueItem recurses into processQueue as soon as
+  // the awaited worker promise rejects, and that recursion re-reads settings;
+  // persisting the pause first is what keeps the next pending item from
+  // starting during teardown.
+  await updateSettings({ queuePaused: true });
+
+  await abortActiveWorker(new Error(STOPPED_BY_USER_ERROR));
 
   if (retainedWorker) {
     await closeWorkerQuietly(retainedWorker);
@@ -607,6 +720,21 @@ async function notifyContentQueueState() {
     queuePaused: settings.queuePaused,
     waitingForDirectOpen: settings.waitingForDirectOpen
   };
+  const stateKey = JSON.stringify([
+    state.activeCount,
+    state.hasActiveWorker,
+    state.queuePaused,
+    state.waitingForDirectOpen
+  ]);
+
+  // Newly opened YouTube tabs bootstrap themselves via get-queue-state, so an
+  // unchanged state never needs a broadcast.
+  if (stateKey === lastContentQueueStateKey) {
+    return;
+  }
+
+  lastContentQueueStateKey = stateKey;
+
   const tabs = await extensionApi.tabs.query({
     url: [
       "*://www.youtube.com/*",
@@ -649,7 +777,7 @@ async function handleRuntimeMessage(message) {
     // Content script capture handler detected a click on our menu item,
     // but Firefox blocks window.open() from capture-phase content script listeners.
     // The background creates the window instead.
-    createWorkerWindow(message.workerUrl).catch(() => {});
+    beginPreopenWorker(message.workerUrl);
     return undefined;
   }
 
@@ -755,13 +883,6 @@ async function handleRuntimeMessage(message) {
     };
   }
 
-  if (message.type === "set-worker-mode") {
-    return {
-      workerMode: await setWorkerMode(message.workerMode),
-      settings: await getSettings()
-    };
-  }
-
   if (message.type === "update-settings") {
     const settings = await updateSettings(message.settings || {});
     await notifyContentQueueState();
@@ -829,6 +950,7 @@ async function handleRuntimeMessage(message) {
     return {
       ok: true,
       stopped,
+      settings: await getSettings(),
       queue: await getQueue()
     };
   }
@@ -960,17 +1082,26 @@ async function stopWorkerPlaybackQuietly(tabId) {
 
 async function getWorkerWindowBounds() {
   const result = await extensionApi.storage.local.get(WORKER_WINDOW_BOUNDS_KEY);
-  const bounds = result[WORKER_WINDOW_BOUNDS_KEY] || {};
-  const normalizedBounds = normalizeWorkerBounds(bounds);
+  const saved = result[WORKER_WINDOW_BOUNDS_KEY];
 
-  return normalizedBounds;
+  if (!saved) {
+    // No saved position yet, so let the browser place the window. Any hardcoded
+    // coordinate would land off-screen on machines with a different layout.
+    return {
+      ...DEFAULT_WORKER_WINDOW_SIZE,
+      left: null,
+      top: null
+    };
+  }
+
+  return clampWorkerBoundsToDisplays(normalizeWorkerBounds(saved));
 }
 
-function normalizeWindowPosition(value, fallback) {
+function normalizeWindowPosition(value) {
   const numberValue = Number(value);
 
   if (!Number.isFinite(numberValue)) {
-    return fallback;
+    return null;
   }
 
   return Math.round(numberValue);
@@ -983,7 +1114,72 @@ function normalizeWorkerWindowSize(value, fallback) {
     return fallback;
   }
 
-  return Math.min(Math.max(Math.round(numberValue), 320), fallback);
+  return Math.min(
+    Math.max(Math.round(numberValue), MIN_WORKER_WINDOW_SIZE),
+    MAX_WORKER_WINDOW_SIZE
+  );
+}
+
+async function getKnownDisplayArea() {
+  const windows = await extensionApi.windows.getAll().catch(() => []);
+  let area = null;
+
+  for (const win of windows) {
+    if (
+      !Number.isFinite(win.left) ||
+      !Number.isFinite(win.top) ||
+      !Number.isFinite(win.width) ||
+      !Number.isFinite(win.height)
+    ) {
+      continue;
+    }
+
+    const right = win.left + win.width;
+    const bottom = win.top + win.height;
+
+    if (!area) {
+      area = { left: win.left, top: win.top, right, bottom };
+      continue;
+    }
+
+    area.left = Math.min(area.left, win.left);
+    area.top = Math.min(area.top, win.top);
+    area.right = Math.max(area.right, right);
+    area.bottom = Math.max(area.bottom, bottom);
+  }
+
+  return area;
+}
+
+// A saved position can point at a monitor that has since been disconnected,
+// which would open the worker somewhere invisible and break playback.
+async function clampWorkerBoundsToDisplays(bounds) {
+  if (!Number.isFinite(bounds.left) || !Number.isFinite(bounds.top)) {
+    return bounds;
+  }
+
+  const area = await getKnownDisplayArea();
+
+  if (!area) {
+    return bounds;
+  }
+
+  const isVisible = (
+    bounds.left < area.right &&
+    bounds.left + bounds.width > area.left &&
+    bounds.top < area.bottom &&
+    bounds.top + bounds.height > area.top
+  );
+
+  if (isVisible) {
+    return bounds;
+  }
+
+  return {
+    ...bounds,
+    left: Math.max(area.left, Math.min(bounds.left, area.right - bounds.width)),
+    top: Math.max(area.top, Math.min(bounds.top, area.bottom - bounds.height))
+  };
 }
 
 async function rememberWorkerWindowBounds(worker) {
@@ -998,21 +1194,18 @@ async function rememberWorkerWindowBounds(worker) {
         height: workerWindow.height
       });
     } catch {
-      if (!lastKnownWorkerBounds) {
+      if (!lastKnownWorkerBounds || !Number.isFinite(lastKnownWorkerBounds.left)) {
         return;
       }
       actualBounds = normalizeWorkerBounds(lastKnownWorkerBounds);
     }
 
-    const requestedBounds = normalizeWorkerBounds(worker.requestedBounds || {});
-
-    const safeBounds = actualBounds;
     await extensionApi.storage.local.set({
-      [WORKER_WINDOW_BOUNDS_KEY]: safeBounds
+      [WORKER_WINDOW_BOUNDS_KEY]: actualBounds
     });
     lastKnownWorkerBounds = null;
     await updateQueueItem(worker.itemId, {}, {
-      event: `window-bounds-saved-${formatBounds(safeBounds)}`,
+      event: `window-bounds-saved-${formatBounds(actualBounds)}`,
       elapsedMs: null
     }).catch(() => {});
   } catch {
@@ -1037,22 +1230,20 @@ async function saveCurrentWorkerWindowBounds() {
     width: workerWindow.width,
     height: workerWindow.height
   });
-  const safeBounds = bounds;
-
   await extensionApi.storage.local.set({
-    [WORKER_WINDOW_BOUNDS_KEY]: safeBounds
+    [WORKER_WINDOW_BOUNDS_KEY]: bounds
   });
 
   if (activeWorker && activeWorker.itemId) {
     await updateQueueItem(activeWorker.itemId, {}, {
-      event: `window-bounds-saved-current-${formatBounds(safeBounds)}`,
+      event: `window-bounds-saved-current-${formatBounds(bounds)}`,
       elapsedMs: null
     }).catch(() => {});
   }
 
   return {
     ok: true,
-    bounds: safeBounds
+    bounds
   };
 }
 
@@ -1078,15 +1269,28 @@ async function findCurrentWorkerWindowId() {
 
 function normalizeWorkerBounds(bounds) {
   return {
-    left: normalizeWindowPosition(bounds.left, DEFAULT_WORKER_WINDOW_BOUNDS.left),
-    top: normalizeWindowPosition(bounds.top, DEFAULT_WORKER_WINDOW_BOUNDS.top),
-    width: normalizeWorkerWindowSize(bounds.width, DEFAULT_WORKER_WINDOW_BOUNDS.width),
-    height: normalizeWorkerWindowSize(bounds.height, DEFAULT_WORKER_WINDOW_BOUNDS.height)
+    left: normalizeWindowPosition(bounds.left),
+    top: normalizeWindowPosition(bounds.top),
+    width: normalizeWorkerWindowSize(bounds.width, DEFAULT_WORKER_WINDOW_SIZE.width),
+    height: normalizeWorkerWindowSize(bounds.height, DEFAULT_WORKER_WINDOW_SIZE.height)
   };
 }
 
 function formatBounds(bounds) {
-  return `${bounds.left},${bounds.top},${bounds.width}x${bounds.height}`;
+  const position = Number.isFinite(bounds.left) && Number.isFinite(bounds.top)
+    ? `${bounds.left},${bounds.top}`
+    : "auto";
+
+  return `${position},${bounds.width}x${bounds.height}`;
+}
+
+function buildWindowGeometry(bounds) {
+  return {
+    ...(Number.isFinite(bounds.left) ? { left: bounds.left } : {}),
+    ...(Number.isFinite(bounds.top) ? { top: bounds.top } : {}),
+    width: bounds.width,
+    height: bounds.height
+  };
 }
 
 async function createWorkerWindow(url) {
@@ -1096,10 +1300,7 @@ async function createWorkerWindow(url) {
     url,
     type: "popup",
     focused: true,
-    left: bounds.left,
-    top: bounds.top,
-    width: bounds.width,
-    height: bounds.height
+    ...buildWindowGeometry(bounds)
   });
   await forceWorkerWindowBoundsRepeatedly(workerWindow.id, bounds);
   const tab = await getWorkerWindowTab(workerWindow);
@@ -1181,10 +1382,7 @@ async function forceWorkerWindowBounds(windowId, bounds) {
   }).catch(() => {});
 
   await extensionApi.windows.update(windowId, {
-    left: bounds.left,
-    top: bounds.top,
-    width: bounds.width,
-    height: bounds.height,
+    ...buildWindowGeometry(bounds),
     focused: true
   });
 
@@ -1328,7 +1526,7 @@ async function sendWorkerMessageWithRetry(tabId, message) {
 function waitForWorkerResult(itemId, timeoutMs) {
   return withTimeout(new Promise((resolve, reject) => {
     if (!activeWorker || activeWorker.itemId !== itemId) {
-      reject(new Error("worker-not-active"));
+      reject(lastWorkerAbortError || new Error("worker-not-active"));
       return;
     }
 
@@ -1344,10 +1542,8 @@ function getWorkerItemTimeoutMs(settings) {
     1,
     30
   ) * 1000;
-  return Math.min(
-    WORKER_TIMEOUT_MS,
-    WORKER_TIMEOUT_BASE_MS + playbackMs + WORKER_TIMEOUT_BUFFER_MS
-  );
+
+  return WORKER_TIMEOUT_BASE_MS + playbackMs + WORKER_TIMEOUT_BUFFER_MS;
 }
 
 function getWorkerTimeoutMessage() {
@@ -1393,37 +1589,42 @@ function handleWorkerStatus(message) {
   }
 }
 
-function resolveActiveWorker(result) {
-  if (!activeWorker || activeWorker.resultResolved) {
-    return;
+function markWorkerSettled(worker) {
+  if (!worker || worker.resultResolved) {
+    return false;
   }
 
-  activeWorker.resultResolved = true;
+  worker.resultResolved = true;
+  return true;
+}
 
-  if (activeWorker.resolve) {
+function resolveActiveWorker(result) {
+  if (markWorkerSettled(activeWorker) && activeWorker.resolve) {
     activeWorker.resolve(result);
+  }
+}
+
+function rejectWorker(worker, error) {
+  if (markWorkerSettled(worker) && worker.reject) {
+    worker.reject(error);
   }
 }
 
 
 function getStatusPlaybackMode(status) {
-  let mode;
-
-  if (status === "hidden-playback-confirmed") {
-    mode = "hidden";
-  } else if (
+  const isForegroundAssist = (
     status === "foreground-assist-started" ||
     status === "foreground-assist-releasing" ||
     status === "foreground-playback-confirmed"
-  ) {
-    mode = "foreground-assisted";
+  );
+
+  if (!isForegroundAssist) {
+    return undefined;
   }
 
-  if (mode) {
-    handlePlaybackModeChange(mode);
-  }
+  handlePlaybackModeChange("foreground-assisted");
 
-  return mode;
+  return "foreground-assisted";
 }
 
 function getPlaybackModeFromResult(result) {
@@ -1440,10 +1641,6 @@ function getPlaybackModeFromResult(result) {
 
 function getDebugSummary(result) {
   const mode = getPlaybackModeFromResult(result);
-
-  if (mode === "hidden") {
-    return "Hidden playback worked";
-  }
 
   if (mode === "foreground-assisted") {
     return "Worker window playback was used";
@@ -1612,9 +1809,7 @@ async function handleQueueItemError(item, error) {
     status: "failed",
     completedAt: new Date().toISOString(),
     playbackMode: activeWorker && activeWorker.playbackMode ? activeWorker.playbackMode : "unknown",
-    debugSummary: activeWorker && activeWorker.playbackMode === "hidden"
-      ? "Hidden playback worked before failure"
-      : "Worker window playback failed",
+    debugSummary: "Worker window playback failed",
     error: error && error.message ? error.message : String(error)
   });
   await notifyQueueUpdated({ item: failedItem });
@@ -1661,6 +1856,7 @@ async function runQueueItem(item) {
     tab = workerSetup.tab;
     workerWindowId = workerSetup.workerWindowId;
 
+    lastWorkerAbortError = null;
     activeWorker = {
       itemId: item.id,
       tabId: tab.id,
@@ -1735,36 +1931,6 @@ async function resetStaleRunningItems() {
   }
 }
 
-async function resetDirectOpenWaitingItems() {
-  const queue = await getQueue();
-  let changed = false;
-  const nextQueue = queue.map((item) => {
-    if (
-      item.status !== "running" ||
-      item.workerStatus !== "waiting-for-direct-window-open"
-    ) {
-      return item;
-    }
-
-    changed = true;
-    return {
-      ...item,
-      status: "pending",
-      workerStatus: null,
-      error: null,
-      updatedAt: new Date().toISOString()
-    };
-  });
-
-  if (changed) {
-    await setQueue(nextQueue);
-    await extensionApi.storage.local.set({
-      [WAITING_FOR_DIRECT_OPEN_KEY]: false
-    });
-    await notifyQueueUpdated();
-  }
-}
-
 async function processQueue() {
   if (activeWorker) {
     return;
@@ -1780,8 +1946,6 @@ async function processQueue() {
     await notifyContentQueueState();
     return;
   }
-
-  await resetDirectOpenWaitingItems();
 
   const queue = await getQueue();
   const item = queue.find((entry) => entry.status === "pending");
@@ -1859,11 +2023,6 @@ extensionApi.tabs.onCreated.addListener((tab) => {
 extensionApi.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   muteWorkerTabIfNeeded(tabId, changeInfo.url || (tab && tab.url)).catch(console.error);
 });
-
-// Removed: onRemoved listener was overwriting correctly saved positions
-// with stale lastKnownWorkerBounds (creation-time bounds, not actual position).
-// Position saving is handled by rememberWorkerWindowBounds (queue transitions)
-// and saveCurrentWorkerWindowBounds (popup "Save window" button).
 
 extensionApi.runtime.onMessage.addListener((message) => {
   return handleRuntimeMessage(message);

@@ -46,6 +46,19 @@
       };
     }
 
+    // Widen contextual sheets so "Mark as watched" does not wrap. Injected here
+    // because this script already runs in page context at document_start.
+    var SHEET_MIN_WIDTH = 240;
+    var sheetStyle = document.createElement("style");
+    sheetStyle.id = "ytwm-sheet-style";
+    sheetStyle.textContent =
+      "tp-yt-iron-dropdown{min-width:" + SHEET_MIN_WIDTH + "px!important;width:auto!important}" +
+      "yt-sheet-view-model{min-width:" + SHEET_MIN_WIDTH + "px!important;width:auto!important}" +
+      "yt-contextual-sheet-layout{min-width:" + SHEET_MIN_WIDTH + "px!important;width:auto!important}" +
+      "yt-contextual-sheet-layout yt-list-view-model{min-width:" + (SHEET_MIN_WIDTH - 10) + "px!important}" +
+      "yt-contextual-sheet-layout yt-list-item-view-model{min-width:" + (SHEET_MIN_WIDTH - 10) + "px!important}";
+    (document.head || document.documentElement).appendChild(sheetStyle);
+
     var WATCHED_TEXT = "Mark as watched";
     var VIDEO_TYPES = ["videoRenderer","compactVideoRenderer","gridVideoRenderer","movieRenderer","compactMovieRenderer","reelItemRenderer","playlistVideoRenderer","compactPlaylistVideoRenderer","channelVideoPlayerRenderer","radioRenderer"];
 
@@ -232,17 +245,31 @@
       if (this._ytwmUrl && this._ytwmUrl.indexOf("/youtubei/v1/") !== -1) {
         var self = this;
         self.addEventListener("readystatechange", function() {
-          if (self.readyState === 4) {
-            try {
-              var j = JSON.parse(self.responseText);
-              modify(j);
-              var modified = JSON.stringify(j);
+          if (self.readyState !== 4) return;
+          // YouTube may read .response with responseType "json" instead of
+          // .responseText, so override whichever accessor it will use.
+          var type = self.responseType;
+          if (type !== "" && type !== "text" && type !== "json") return;
+          try {
+            var parsed = type === "json" ? self.response : JSON.parse(self.responseText);
+            modify(parsed);
+            if (type === "json") {
+              Object.defineProperty(self, "response", {
+                configurable: true,
+                get: function() { return parsed; }
+              });
+            } else {
+              var modified = JSON.stringify(parsed);
               Object.defineProperty(self, "responseText", {
                 configurable: true,
                 get: function() { return modified; }
               });
-            } catch(e) {}
-          }
+              Object.defineProperty(self, "response", {
+                configurable: true,
+                get: function() { return modified; }
+              });
+            }
+          } catch(e) {}
         });
       }
       return _send.apply(this, arguments);

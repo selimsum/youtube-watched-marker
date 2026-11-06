@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "YouTube™ Watched Marker",
-  "version": "0.1.32",
+  "version": "0.1.33",
   "description": "Queues YouTube™ videos and briefly plays them in a worker window to simulate watched playback.",
   "homepage_url": "https://github.com/selimsum/youtube-watched-marker",
   "permissions": [
@@ -56,7 +56,9 @@
   },
   "icons": {
     "48": "icons/icon-48.svg",
-    "96": "icons/icon-96.svg"
+    "96": "icons/icon-96.svg",
+    "128": "icons/icon-128.png",
+    "512": "icons/icon-512.png"
   },
   "browser_specific_settings": {
     "gecko": {

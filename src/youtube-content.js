@@ -3,16 +3,7 @@
 const CHANNEL_SCAN_MAX_SCROLLS = 120;
 const CHANNEL_SCAN_STABLE_SCROLLS = 4;
 const CHANNEL_SCAN_RECENT_OLDER_COUNT = 8;
-const SHEET_WIDTH_PX = 240;
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-// Widen contextual sheets to prevent text wrapping (blockbox interaction)
-(function() {
-  var s = document.createElement('script');
-  s.textContent = 'window.__ytwmSheetWidth=function(w){var st=document.getElementById("ytwm-sheet-style")||document.createElement("style");st.id="ytwm-sheet-style";st.textContent=w?"tp-yt-iron-dropdown{min-width:"+w+"px!important;width:auto!important}yt-sheet-view-model{min-width:"+w+"px!important;width:auto!important}yt-contextual-sheet-layout{min-width:"+w+"px!important;width:auto!important}yt-contextual-sheet-layout yt-list-view-model{min-width:"+(w-10)+"px!important}yt-contextual-sheet-layout yt-list-item-view-model{min-width:"+(w-10)+"px!important}":"";if(w){document.documentElement.appendChild(st)}else{st.remove()}};window.__ytwmSheetWidth(' + SHEET_WIDTH_PX + ')';
-  document.documentElement.appendChild(s);
-  s.remove();
-})();
 
 const WATCHED_ITEM_TEXT = 'Mark as watched';
 
@@ -27,23 +18,7 @@ function getContainerCache(container) {
   return cache;
 }
 
-const VIDEO_CONTAINER_SELECTOR = [
-  "ytd-rich-item-renderer",
-  "ytd-rich-grid-media",
-  "ytd-rich-grid-slim-media",
-  "yt-lockup-view-model",
-  "yt-lockup-metadata-view-model",
-  "ytd-video-renderer",
-  "ytd-compact-video-renderer",
-  "ytd-grid-video-renderer",
-  "ytd-playlist-video-renderer",
-  "ytd-reel-item-renderer",
-  "ytd-radio-renderer",
-  "ytd-channel-video-player-renderer",
-  "ytd-watch-flexy"
-].join(",");
-
-const VIDEO_CONTAINERS_SELECTOR = [
+const SCAN_CONTAINER_TYPES = [
   "ytd-rich-item-renderer",
   "ytd-rich-grid-media",
   "ytd-rich-grid-slim-media",
@@ -55,29 +30,48 @@ const VIDEO_CONTAINERS_SELECTOR = [
   "ytd-playlist-video-renderer",
   "ytd-reel-item-renderer",
   "ytd-radio-renderer"
+];
+
+// Channel scanning skips watch-page and inline-player containers; menu
+// targeting still needs them.
+const MENU_CONTAINER_SELECTOR = [
+  ...SCAN_CONTAINER_TYPES,
+  "ytd-channel-video-player-renderer",
+  "ytd-watch-flexy"
 ].join(",");
 
-let workerWindowBounds = { ...DEFAULT_WORKER_WINDOW_BOUNDS };
+const SCAN_CONTAINER_SELECTOR = SCAN_CONTAINER_TYPES.join(",");
+
+let workerWindowBounds = null;
 
 function buildWorkerWindowFeatures(bounds) {
-  return [
+  const features = [
     "popup=yes",
     "noopener",
     "noreferrer",
-    `left=${bounds.left}`,
-    `top=${bounds.top}`,
     `width=${bounds.width}`,
     `height=${bounds.height}`
-  ].join(",");
+  ];
+
+  if (Number.isFinite(bounds.left) && Number.isFinite(bounds.top)) {
+    features.push(`left=${bounds.left}`, `top=${bounds.top}`);
+  }
+
+  return features.join(",");
 }
 
 let lastMenuVideoUrl = null;
 let lastMenuVideoTitle = "";
-let pendingOpenedWorkerWindow = null;
 let pendingOpenedWorkerUrl = null;
 let canOpenWorkerWindow = true;
 
 const extensionApi = getExtensionApi();
+
+function refreshDirectOpenState() {
+  extensionApi.runtime.sendMessage({ type: "get-queue-state" })
+    .then(updateDirectOpenState)
+    .catch(() => {});
+}
 
 extensionApi.storage.local.get("workerWindowBounds").then((result) => {
   const saved = result.workerWindowBounds;
@@ -85,8 +79,8 @@ extensionApi.storage.local.get("workerWindowBounds").then((result) => {
     workerWindowBounds = {
       left: saved.left,
       top: saved.top,
-      width: saved.width || DEFAULT_WORKER_WINDOW_BOUNDS.width,
-      height: saved.height || DEFAULT_WORKER_WINDOW_BOUNDS.height
+      width: saved.width || DEFAULT_WORKER_WINDOW_SIZE.width,
+      height: saved.height || DEFAULT_WORKER_WINDOW_SIZE.height
     };
   }
 }).catch(() => {});
@@ -142,9 +136,7 @@ function updateDirectOpenState(state) {
   );
 }
 
-extensionApi.runtime.sendMessage({ type: "get-queue-state" })
-  .then(updateDirectOpenState)
-  .catch(() => {});
+refreshDirectOpenState();
 
 extensionApi.runtime.onMessage.addListener((message) => {
   if (message && message.type === "queue-state") {
@@ -257,7 +249,7 @@ function collectChannelVideos(videosById, unparseableVideoIds, pageDataDates) {
 
   for (const container of getVideoContainers(root)) {
     const url = findVideoUrlInContainer(container);
-    const videoId = getVideoIdFromUrl(url);
+    const videoId = extractVideoIdFromUrl(url);
 
     if (!videoId || videosById.has(videoId) || unparseableVideoIds.has(videoId)) {
       continue;
@@ -713,10 +705,7 @@ const VIDEO_URL_SELECTORS = [
   "a.yt-lockup-metadata-view-model__title[href]",
   "a.yt-simple-endpoint[href]",
   "a[href*='watch?v=']",
-  "a[href*='/watch?v=']",
-  "a[href^='/shorts/']",
   "a[href*='/shorts/']",
-  "a[href^='/live/']",
   "a[href*='/live/']"
 ];
 
@@ -745,18 +734,18 @@ function findVideoUrlInContainer(container) {
 }
 
 function getVideoContainer(element) {
-  return element && element.closest && element.closest(VIDEO_CONTAINER_SELECTOR);
+  return element && element.closest && element.closest(MENU_CONTAINER_SELECTOR);
 }
 
 function getVideoContainers(root) {
   const containers = [];
 
-  if (root.nodeType === Node.ELEMENT_NODE && root.matches(VIDEO_CONTAINERS_SELECTOR)) {
+  if (root.nodeType === Node.ELEMENT_NODE && root.matches(SCAN_CONTAINER_SELECTOR)) {
     containers.push(root);
   }
 
   if (root.querySelectorAll) {
-    for (const container of root.querySelectorAll(VIDEO_CONTAINERS_SELECTOR)) {
+    for (const container of root.querySelectorAll(SCAN_CONTAINER_SELECTOR)) {
       containers.push(container);
     }
   }
@@ -907,7 +896,11 @@ function openWorkerWindow(workerUrl) {
   }
 
   try {
-    return window.open(workerUrl, "ytwm-worker", buildWorkerWindowFeatures(workerWindowBounds));
+    return window.open(
+      workerUrl,
+      "ytwm-worker",
+      buildWorkerWindowFeatures(workerWindowBounds || DEFAULT_WORKER_WINDOW_SIZE)
+    );
   } catch {
     return null;
   }
@@ -915,48 +908,46 @@ function openWorkerWindow(workerUrl) {
 
 async function enqueueDirectOpen(url, title) {
   const workerUrl = buildWorkerUrl(url);
-  let openedWorkerWindow = pendingOpenedWorkerUrl === workerUrl
-    ? pendingOpenedWorkerWindow
-    : null;
+  const preopened = Boolean(workerUrl) && pendingOpenedWorkerUrl === workerUrl;
+  let openedWorkerWindow = null;
 
-  if (!openedWorkerWindow && canOpenWorkerWindow) {
+  if (!preopened && canOpenWorkerWindow) {
     openedWorkerWindow = openWorkerWindow(workerUrl);
+
     if (openedWorkerWindow) {
       canOpenWorkerWindow = false;
     }
   }
 
-  pendingOpenedWorkerWindow = null;
   pendingOpenedWorkerUrl = null;
 
-  if (!openedWorkerWindow && canOpenWorkerWindow) {
+  if (!preopened && !openedWorkerWindow && canOpenWorkerWindow) {
     throw new Error("worker-window-blocked");
   }
 
   const response = await extensionApi.runtime.sendMessage({
-    type: openedWorkerWindow ? "enqueue-video-url-with-opened-worker" : "enqueue-video-url",
+    type: preopened || openedWorkerWindow
+      ? "enqueue-video-url-with-opened-worker"
+      : "enqueue-video-url",
     url,
     title,
     workerUrl,
     openedWorkerUrl: workerUrl
   });
 
+  // The background owns any window it preopened and closes it itself. It only
+  // asks us to close a window this script opened directly.
+  if (openedWorkerWindow && response && response.closeOpenedWorker) {
+    openedWorkerWindow.close();
+  }
+
   if (response && response.ok === false) {
-    if (openedWorkerWindow) {
-      openedWorkerWindow.close();
-    }
-    extensionApi.runtime.sendMessage({ type: "get-queue-state" })
-      .then(updateDirectOpenState)
-      .catch(() => {});
+    refreshDirectOpenState();
     throw new Error(response.error || "enqueue-failed");
   }
 
   if (response && response.created) {
     canOpenWorkerWindow = false;
-  }
-
-  if (openedWorkerWindow && response && !response.created) {
-    openedWorkerWindow.close();
   }
 
   return response;
@@ -997,7 +988,6 @@ function handleWatchedClick() {
 }
 
 document.addEventListener("pointerdown", rememberMenuTarget, true);
-document.addEventListener("mousedown", rememberMenuTarget, true);
 document.addEventListener("click", rememberMenuTarget, true);
 
 // Capture-phase detection works inside YouTube's shadow DOMs.
@@ -1011,9 +1001,8 @@ document.addEventListener('pointerdown', (e) => {
   const url = lastMenuVideoUrl || getFallbackVideoUrl();
   if (!url) return;
   const workerUrl = buildWorkerUrl(url);
-  if (!workerUrl || pendingOpenedWorkerWindow) return;
+  if (!workerUrl || pendingOpenedWorkerUrl) return;
   pendingOpenedWorkerUrl = workerUrl;
-  pendingOpenedWorkerWindow = {}; // dummy truthy — background handles the actual window
   canOpenWorkerWindow = false;
   extensionApi.runtime.sendMessage({
     type: "preopen-worker",

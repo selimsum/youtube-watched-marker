@@ -312,6 +312,14 @@ function createQueueNode(item) {
 
   const debug = document.createElement("div");
   debug.className = "debug";
+
+  if (item.debugSummary) {
+    const debugSummaryNode = document.createElement("div");
+    debugSummaryNode.className = "debug-summary";
+    debugSummaryNode.textContent = item.debugSummary;
+    debug.append(debugSummaryNode);
+  }
+
   debug.append(createDebugTimelineNode(item));
 
   topRow.append(title, status);
@@ -358,10 +366,6 @@ function formatDebugEvent(entry) {
 
 function getItemDetailText(item) {
   if (item.status === "failed" && item.error) {
-    if (item.error.startsWith("hidden-autoplay-blocked")) {
-      return "Failed: hidden autoplay blocked by Firefox/YouTube™";
-    }
-
     if (item.error.startsWith("foreground-assist-playback-blocked")) {
       return "Failed: worker window could not start playback";
     }
@@ -388,18 +392,64 @@ function getItemDetailText(item) {
   return `Queued ${formatDate(item.createdAt)}`;
 }
 
+const queueNodes = new Map();
+
+function itemSignature(item) {
+  return [
+    item.status,
+    item.workerStatus || "",
+    item.updatedAt || "",
+    item.title || "",
+    item.error || "",
+    (item.debugEvents || []).length
+  ].join("|");
+}
+
 function renderQueue(queue) {
   currentQueue = queue;
   document.body.classList.toggle("debug-visible", debugVisible);
-  queueList.replaceChildren();
 
-  for (const item of queue) {
-    queueList.append(createQueueNode(item));
+  // Rebuild only rows whose content changed, so scroll position and focus
+  // survive the per-second worker status updates.
+  const visibleIds = new Set();
+
+  queue.forEach((item, index) => {
+    visibleIds.add(item.id);
+
+    const entry = queueNodes.get(item.id);
+    const signature = itemSignature(item);
+
+    if (entry && entry.signature === signature) {
+      if (queueList.children[index] !== entry.node) {
+        queueList.insertBefore(entry.node, queueList.children[index] || null);
+      }
+      return;
+    }
+
+    const node = createQueueNode(item);
+    queueNodes.set(item.id, { node, signature });
+
+    if (entry && queueList.children[index] === entry.node) {
+      queueList.replaceChild(node, entry.node);
+    } else {
+      queueList.insertBefore(node, queueList.children[index] || null);
+    }
+  });
+
+  for (const [id, entry] of queueNodes) {
+    if (!visibleIds.has(id)) {
+      entry.node.remove();
+      queueNodes.delete(id);
+    }
   }
 
   summary.textContent = getQueueSummary(queue);
   emptyState.hidden = queue.length !== 0;
   clearButton.disabled = queue.length === 0;
+
+  if (clearButton.disabled) {
+    disarmClear();
+  }
 }
 
 function getQueueSummary(queue) {
@@ -498,6 +548,12 @@ async function removeItem(itemId) {
 async function sendQueueAction(type) {
   const response = await extensionApi.runtime.sendMessage({ type });
   renderQueue(response.queue || []);
+
+  // Stop pauses the queue and returns the fresh settings; reflect them so the
+  // pause button and summary match the new state without a reopen.
+  if (response.settings) {
+    applySettings(response.settings);
+  }
 }
 
 async function exportDebugLog() {
@@ -519,7 +575,25 @@ async function exportDebugLog() {
   URL.revokeObjectURL(url);
 }
 
+let clearArmed = false;
+let clearArmTimer = 0;
+
+function disarmClear() {
+  clearArmed = false;
+  clearTimeout(clearArmTimer);
+  clearButton.textContent = "Clear";
+}
+
 clearButton.addEventListener("click", () => {
+  if (!clearArmed) {
+    clearArmed = true;
+    clearButton.textContent = "Confirm clear";
+    clearTimeout(clearArmTimer);
+    clearArmTimer = setTimeout(disarmClear, 3000);
+    return;
+  }
+
+  disarmClear();
   clearQueue().catch(console.error);
 });
 

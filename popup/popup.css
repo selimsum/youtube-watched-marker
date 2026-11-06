@@ -1,8 +1,51 @@
 :root {
-  color-scheme: light;
+  color-scheme: light dark;
+  --bg: #f7f7f5;
+  --surface: #ffffff;
+  --surface-muted: #eeeeea;
+  --text: #172033;
+  --muted: #566070;
+  --faint: #707784;
+  --border: #deded8;
+  --control-border: #b8bab3;
+  --accent: #7c3aed;
+  --accent-text: #5b21b6;
+  --accent-bg: #ede9fe;
+  --chip-pending-text: #7c2d12;
+  --chip-pending-bg: #ffedd5;
+  --chip-running-text: #1d4ed8;
+  --chip-running-bg: #dbeafe;
+  --chip-completed-text: #166534;
+  --chip-completed-bg: #dcfce7;
+  --chip-failed-text: #991b1b;
+  --chip-failed-bg: #fee2e2;
   font: 13px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: #172033;
-  background: #f7f7f5;
+  color: var(--text);
+  background: var(--bg);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17181c;
+    --surface: #22242a;
+    --surface-muted: #2c2f36;
+    --text: #e8e9ec;
+    --muted: #a7adba;
+    --faint: #8b919e;
+    --border: #34373f;
+    --control-border: #4a4e58;
+    --accent: #a78bfa;
+    --accent-text: #c4b5fd;
+    --accent-bg: #33265c;
+    --chip-pending-text: #fdba74;
+    --chip-pending-bg: #3d2410;
+    --chip-running-text: #93c5fd;
+    --chip-running-bg: #16283f;
+    --chip-completed-text: #86efac;
+    --chip-completed-bg: #12301c;
+    --chip-failed-text: #fca5a5;
+    --chip-failed-bg: #3a1616;
+  }
 }
 
 * {
@@ -26,7 +69,7 @@ body {
   max-width: 360px;
   min-height: 240px;
   margin: 0;
-  background: #f7f7f5;
+  background: var(--bg);
   overflow-x: hidden;
 }
 
@@ -44,7 +87,7 @@ body {
   gap: 12px;
   min-width: 0;
   padding-bottom: 12px;
-  border-bottom: 1px solid #deded8;
+  border-bottom: 1px solid var(--border);
 }
 
 .header-actions {
@@ -61,41 +104,41 @@ h1 {
 
 p {
   margin: 4px 0 0;
-  color: #566070;
+  color: var(--muted);
 }
 
 button {
   min-width: 56px;
   min-height: 32px;
-  border: 1px solid #b8bab3;
+  border: 1px solid var(--control-border);
   border-radius: 6px;
-  color: #172033;
-  background: #ffffff;
+  color: var(--text);
+  background: var(--surface);
   font: inherit;
   cursor: pointer;
 }
 
 button[aria-pressed="true"] {
-  border-color: #7c3aed;
-  color: #5b21b6;
-  background: #ede9fe;
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--accent-bg);
 }
 
 button:disabled {
-  color: #8b909a;
+  color: var(--faint);
   cursor: default;
-  background: #eeeeea;
+  background: var(--surface-muted);
 }
 
 .empty {
   padding: 28px 4px;
-  color: #566070;
+  color: var(--muted);
   text-align: center;
 }
 
 .queue-actions {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 6px;
   min-width: 0;
   padding: 10px 0 0;
@@ -107,6 +150,14 @@ button:disabled {
   font-size: 12px;
 }
 
+.queue-actions button:nth-child(-n+2) {
+  grid-column: span 3;
+}
+
+.queue-actions button:nth-child(n+3) {
+  grid-column: span 2;
+}
+
 .channel-timeframe {
   display: grid;
   gap: 8px;
@@ -116,7 +167,7 @@ button:disabled {
 
 .channel-timeframe h2 {
   margin: 0;
-  color: #172033;
+  color: var(--text);
   font-size: 13px;
   font-weight: 700;
 }
@@ -168,7 +219,7 @@ button:disabled {
   align-items: stretch;
   gap: 3px;
   min-width: 0;
-  color: #566070;
+  color: var(--muted);
 }
 
 .label-row {
@@ -185,10 +236,10 @@ button:disabled {
   width: 15px;
   height: 15px;
   flex: 0 0 auto;
-  border: 1px solid #aeb4bf;
+  border: 1px solid var(--control-border);
   border-radius: 50%;
-  color: #566070;
-  background: #ffffff;
+  color: var(--muted);
+  background: var(--surface);
   font-size: 10px;
   font-weight: 700;
   line-height: 1;
@@ -197,7 +248,7 @@ button:disabled {
 }
 
 .info-icon:focus-visible {
-  outline: 2px solid #7c3aed;
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -211,10 +262,10 @@ input[type="text"] {
   min-height: 32px;
   width: 100%;
   min-width: 0;
-  border: 1px solid #b8bab3;
+  border: 1px solid var(--control-border);
   border-radius: 6px;
-  background: #ffffff;
-  color: #172033;
+  background: var(--surface);
+  color: var(--text);
   font: inherit;
 }
 
@@ -222,7 +273,7 @@ input[type="text"] {
   grid-column: 1 / -1;
   margin: 0;
   overflow: hidden;
-  color: #707784;
+  color: var(--faint);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -257,9 +308,9 @@ input[type="text"] {
   min-width: 0;
   gap: 6px;
   padding: 10px;
-  border: 1px solid #deded8;
+  border: 1px solid var(--border);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--surface);
 }
 
 .item-actions {
@@ -287,13 +338,13 @@ input[type="text"] {
   overflow-wrap: anywhere;
   font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
   font-size: 12px;
-  color: #707784;
+  color: var(--faint);
 }
 
 .video-title {
   min-width: 0;
   overflow: hidden;
-  color: #172033;
+  color: var(--text);
   font-size: 13px;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -304,38 +355,38 @@ input[type="text"] {
   flex: 0 0 auto;
   padding: 2px 7px;
   border-radius: 999px;
-  color: #7c2d12;
-  background: #ffedd5;
+  color: var(--chip-pending-text);
+  background: var(--chip-pending-bg);
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
 }
 
 .queue-item-running .status {
-  color: #1d4ed8;
-  background: #dbeafe;
+  color: var(--chip-running-text);
+  background: var(--chip-running-bg);
 }
 
 .queue-item-completed .status {
-  color: #166534;
-  background: #dcfce7;
+  color: var(--chip-completed-text);
+  background: var(--chip-completed-bg);
 }
 
 .queue-item-failed .status {
-  color: #991b1b;
-  background: #fee2e2;
+  color: var(--chip-failed-text);
+  background: var(--chip-failed-bg);
 }
 
 .source {
   overflow: hidden;
-  color: #566070;
+  color: var(--muted);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .created {
-  color: #707784;
+  color: var(--faint);
   font-size: 12px;
 }
 
@@ -349,8 +400,13 @@ input[type="text"] {
   display: grid;
 }
 
+.debug-summary {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .debug-timeline {
-  color: #707784;
+  color: var(--faint);
   font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
   font-size: 11px;
   line-height: 1.35;

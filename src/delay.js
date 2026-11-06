@@ -5,7 +5,3 @@ function delay(ms) {
     setTimeout(resolve, ms);
   });
 }
-
-if (typeof module !== "undefined" && module.exports) {
-  module.exports = { delay };
-}

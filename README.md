@@ -10,7 +10,7 @@ Firefox-first WebExtension for queuing YouTube™ videos and simulating watched 
 - Stores each video once in a local queue.
 - Opens one queued video at a time in a dedicated worker browser window.
 - Defaults the worker window to `1280x720` at `left=2176, top=144`, based on the tested secondary-screen preset for a 4K 200% primary monitor with a 1920x1080 125% laptop monitor to the right.
-- Seeks near the last 30 seconds, plays for 5 seconds, then closes the tab.
+- Seeks near the last 30 seconds, plays for 5 seconds, then closes the worker window.
 - Starts playback in the worker browser window, then returns focus to the previous tab while the 5-second run continues.
 - Shows the queue in the extension popup.
 - Adds a popup channel timeframe scanner that queues videos from the active channel Videos page between two entered dates.
@@ -18,9 +18,8 @@ Firefox-first WebExtension for queuing YouTube™ videos and simulating watched 
 - Marks each local queue item as `pending`, `running`, `completed`, or `failed`.
 - Lets you retry or remove individual completed/failed queue items.
 - Includes a popup debug toggle for playback event timelines and an export button for a JSON debug log.
-- Includes popup controls for worker mode, playback seconds, seek distance from the end, low-quality requests, stopping the active worker, retrying failed items, and clearing completed/failed items.
+- Includes popup controls for worker mode, playback seconds, seek distance from the end, stopping the active worker (which also pauses the queue so the next item does not start), retrying failed items, and clearing completed/failed items.
 - Includes a queue pause/resume control and a configurable active queue limit.
-- Shows a popup warning that marking opens a muted worker browser window while signed in.
 - Includes reset/save buttons for the remembered worker window bounds.
 - Uses a stable Firefox add-on ID: `youtube-watched-marker@hayalet`.
 
@@ -43,7 +42,7 @@ Firefox-first WebExtension for queuing YouTube™ videos and simulating watched 
 - Pausing the queue allows new items to be added without starting worker playback until the queue is resumed.
 - The max queue size applies to active items: `pending` plus `running`.
 - The active queue limit can be raised up to 500 for larger channel timeframe scans.
-- A queued item briefly opens a muted background tab and then changes status.
+- A queued item briefly opens a muted worker window and then changes status.
 
 ## Development checks
 

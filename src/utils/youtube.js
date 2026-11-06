@@ -2,9 +2,7 @@
 
 const VIDEO_ID_PATTERN = /^[a-zA-Z0-9_-]{11}$/;
 
-const DEFAULT_WORKER_WINDOW_BOUNDS = {
-  left: 2176,
-  top: 144,
+const DEFAULT_WORKER_WINDOW_SIZE = {
   width: 1280,
   height: 720
 };
@@ -65,10 +63,6 @@ function extractVideoIdFromUrl(rawUrl) {
   return null;
 }
 
-function getVideoIdFromUrl(rawUrl) {
-  return extractVideoIdFromUrl(rawUrl);
-}
-
 function buildWatchUrl(videoId) {
   const url = new URL("https://www.youtube.com/watch");
   url.searchParams.set("v", videoId);
@@ -81,17 +75,4 @@ function buildWatchUrl(videoId) {
 function buildWorkerUrl(rawUrl) {
   const videoId = extractVideoIdFromUrl(rawUrl);
   return videoId ? buildWatchUrl(videoId) : null;
-}
-
-if (typeof module !== "undefined" && module.exports) {
-  module.exports = {
-    DEFAULT_WORKER_WINDOW_BOUNDS,
-    buildWatchUrl,
-    buildWorkerUrl,
-    cleanVideoId,
-    extractVideoIdFromUrl,
-    getVideoIdFromUrl,
-    isYouTubeHost,
-    normalizeUrl
-  };
 }
