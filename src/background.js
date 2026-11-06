@@ -225,7 +225,7 @@ async function enqueueVideo(videoId, sourceUrl, title, extra) {
   }
 
   const item = createQueueItem(videoId, sourceUrl, title, extra);
-  queue.unshift(item);
+  queue.push(item);
   await setQueue(queue);
 
   if (extra && extra.openedWorkerUrl) {
@@ -297,7 +297,7 @@ async function bulkEnqueueVideos(videos, source, channelUrl) {
   }
 
   if (createdItems.length) {
-    await setQueue([...createdItems, ...queue]);
+    await setQueue([...queue, ...createdItems]);
   }
 
   return {
