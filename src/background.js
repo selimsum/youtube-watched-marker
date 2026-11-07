@@ -24,6 +24,9 @@ const STOPPED_BY_USER_ERROR = "stopped-by-user";
 const MIN_WORKER_WINDOW_SIZE = 320;
 const MAX_WORKER_WINDOW_SIZE = 3840;
 const PREOPEN_CLAIM_TIMEOUT_MS = 20000;
+const WORKER_BOUNDS_SETTLE_ATTEMPTS = 6;
+const WORKER_BOUNDS_SETTLE_INTERVAL_MS = 200;
+const WORKER_BOUNDS_MATCH_TOLERANCE_PX = 8;
 
 let activeWorker = null;
 let retainedWorker = null;
@@ -1094,7 +1097,10 @@ async function getWorkerWindowBounds() {
     };
   }
 
-  return clampWorkerBoundsToDisplays(normalizeWorkerBounds(saved));
+  // Trust the saved position as-is. Firefox pulls a window back onto an
+  // attached display when the coordinates are unreachable, and the readback in
+  // rememberWorkerWindowBounds then records that corrected position.
+  return normalizeWorkerBounds(saved);
 }
 
 function normalizeWindowPosition(value) {
@@ -1118,68 +1124,6 @@ function normalizeWorkerWindowSize(value, fallback) {
     Math.max(Math.round(numberValue), MIN_WORKER_WINDOW_SIZE),
     MAX_WORKER_WINDOW_SIZE
   );
-}
-
-async function getKnownDisplayArea() {
-  const windows = await extensionApi.windows.getAll().catch(() => []);
-  let area = null;
-
-  for (const win of windows) {
-    if (
-      !Number.isFinite(win.left) ||
-      !Number.isFinite(win.top) ||
-      !Number.isFinite(win.width) ||
-      !Number.isFinite(win.height)
-    ) {
-      continue;
-    }
-
-    const right = win.left + win.width;
-    const bottom = win.top + win.height;
-
-    if (!area) {
-      area = { left: win.left, top: win.top, right, bottom };
-      continue;
-    }
-
-    area.left = Math.min(area.left, win.left);
-    area.top = Math.min(area.top, win.top);
-    area.right = Math.max(area.right, right);
-    area.bottom = Math.max(area.bottom, bottom);
-  }
-
-  return area;
-}
-
-// A saved position can point at a monitor that has since been disconnected,
-// which would open the worker somewhere invisible and break playback.
-async function clampWorkerBoundsToDisplays(bounds) {
-  if (!Number.isFinite(bounds.left) || !Number.isFinite(bounds.top)) {
-    return bounds;
-  }
-
-  const area = await getKnownDisplayArea();
-
-  if (!area) {
-    return bounds;
-  }
-
-  const isVisible = (
-    bounds.left < area.right &&
-    bounds.left + bounds.width > area.left &&
-    bounds.top < area.bottom &&
-    bounds.top + bounds.height > area.top
-  );
-
-  if (isVisible) {
-    return bounds;
-  }
-
-  return {
-    ...bounds,
-    left: Math.max(area.left, Math.min(bounds.left, area.right - bounds.width)),
-    top: Math.max(area.top, Math.min(bounds.top, area.bottom - bounds.height))
-  };
 }
 
 async function rememberWorkerWindowBounds(worker) {
@@ -1367,13 +1311,61 @@ function urlsMatchIgnoringEncoding(actualUrl, expectedUrl) {
 }
 
 async function forceWorkerWindowBoundsRepeatedly(windowId, bounds) {
-  const enforceBounds = () => forceWorkerWindowBounds(windowId, bounds).catch(() => {});
-  setTimeout(enforceBounds, 0);
-  setTimeout(enforceBounds, 250);
-  setTimeout(enforceBounds, 750);
-  setTimeout(enforceBounds, 1500);
+  settleWorkerWindowBounds(windowId, bounds).catch(() => {});
 
   await delay(75);
+}
+
+// Firefox does not always honour the geometry passed to windows.create(), so
+// check where the window actually landed and correct it only when it differs.
+// Asserting the geometry unconditionally steals focus on every attempt and
+// reverts a drag made while the worker is still starting up.
+async function settleWorkerWindowBounds(windowId, bounds) {
+  for (let attempt = 0; attempt < WORKER_BOUNDS_SETTLE_ATTEMPTS; attempt += 1) {
+    await delay(WORKER_BOUNDS_SETTLE_INTERVAL_MS);
+
+    const placed = await readWorkerWindowBounds(windowId);
+
+    // A null read means the window is already gone; stop rather than recreate
+    // geometry for a dead windowId.
+    if (!placed || matchesWorkerBounds(placed, bounds)) {
+      return;
+    }
+
+    await forceWorkerWindowBounds(windowId, bounds).catch(() => {});
+  }
+}
+
+async function readWorkerWindowBounds(windowId) {
+  try {
+    return normalizeWorkerBounds(await extensionApi.windows.get(windowId));
+  } catch {
+    return null;
+  }
+}
+
+function matchesWorkerBounds(placed, expected) {
+  const withinTolerance = (actual, target) => (
+    Math.abs(actual - target) <= WORKER_BOUNDS_MATCH_TOLERANCE_PX
+  );
+
+  if (
+    !withinTolerance(placed.width, expected.width) ||
+    !withinTolerance(placed.height, expected.height)
+  ) {
+    return false;
+  }
+
+  // A null position means the browser was asked to place the window itself, so
+  // there is no target coordinate to compare against.
+  if (!Number.isFinite(expected.left) || !Number.isFinite(expected.top)) {
+    return true;
+  }
+
+  return (
+    withinTolerance(placed.left, expected.left) &&
+    withinTolerance(placed.top, expected.top)
+  );
 }
 
 async function forceWorkerWindowBounds(windowId, bounds) {
@@ -1381,10 +1373,7 @@ async function forceWorkerWindowBounds(windowId, bounds) {
     state: "normal"
   }).catch(() => {});
 
-  await extensionApi.windows.update(windowId, {
-    ...buildWindowGeometry(bounds),
-    focused: true
-  });
+  await extensionApi.windows.update(windowId, buildWindowGeometry(bounds));
 
   lastKnownWorkerBounds = { ...bounds };
 }

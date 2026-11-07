@@ -73,8 +73,7 @@ function refreshDirectOpenState() {
     .catch(() => {});
 }
 
-extensionApi.storage.local.get("workerWindowBounds").then((result) => {
-  const saved = result.workerWindowBounds;
+function applyWorkerWindowBounds(saved) {
   if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
     workerWindowBounds = {
       left: saved.left,
@@ -82,8 +81,26 @@ extensionApi.storage.local.get("workerWindowBounds").then((result) => {
       width: saved.width || DEFAULT_WORKER_WINDOW_SIZE.width,
       height: saved.height || DEFAULT_WORKER_WINDOW_SIZE.height
     };
+    return;
   }
+
+  workerWindowBounds = null;
+}
+
+extensionApi.storage.local.get("workerWindowBounds").then((result) => {
+  applyWorkerWindowBounds(result.workerWindowBounds);
 }).catch(() => {});
+
+// The saved position changes whenever a worker window is closed or the user
+// drags one, which is usually after this tab loaded. Without this the
+// window.open() fallback keeps aiming at the position from page load.
+extensionApi.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "local" || !changes.workerWindowBounds) {
+    return;
+  }
+
+  applyWorkerWindowBounds(changes.workerWindowBounds.newValue);
+});
 
 const MONTHS = {
   jan: 0,
