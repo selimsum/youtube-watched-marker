@@ -10,7 +10,7 @@
     "build": "web-ext build --source-dir . --artifacts-dir web-ext-artifacts --overwrite-dest --ignore-files package.json package-lock.json node_modules web-ext-artifacts build-xpi.ps1 README.md PRIVACY.md",
     "build-xpi": "powershell -ExecutionPolicy Bypass -File build-xpi.ps1"
   },
-  "dependencies": {
+  "devDependencies": {
     "web-ext": "^10.8.0"
   }
 }
