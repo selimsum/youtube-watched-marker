@@ -1,0 +1,97 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - manifest.json
+      - package.json
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    name: Detect version bump
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.version.outputs.publish }}
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          manifest_version=$(node -p "require('./manifest.json').version")
+          package_version=$(node -p "require('./package.json').version")
+          if [ "$manifest_version" != "$package_version" ]; then
+            echo "::error::manifest.json ($manifest_version) and package.json ($package_version) disagree"
+            exit 1
+          fi
+          tag="v$manifest_version"
+          echo "version=$manifest_version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "$tag is already published, nothing to do."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  publish:
+    name: Publish ${{ needs.detect.outputs.tag }}
+    needs: detect
+    if: needs.detect.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Check
+        run: npm run check
+
+      - name: Build
+        run: npm run build
+
+      - name: Stage assets
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          archives=(web-ext-artifacts/*.zip)
+          if [ "${#archives[@]}" -ne 1 ]; then
+            echo "::error::expected one build archive, found ${#archives[@]}"
+            exit 1
+          fi
+          version="${{ needs.detect.outputs.version }}"
+          mkdir -p dist
+          cp "${archives[0]}" "dist/youtube-watched-marker-$version.zip"
+          cp "${archives[0]}" "dist/youtube-watched-marker-$version.xpi"
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release create "${{ needs.detect.outputs.tag }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "${{ needs.detect.outputs.tag }}" \
+            --generate-notes \
+            dist/youtube-watched-marker-${{ needs.detect.outputs.version }}.zip \
+            dist/youtube-watched-marker-${{ needs.detect.outputs.version }}.xpi
