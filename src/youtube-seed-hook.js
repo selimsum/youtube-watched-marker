@@ -60,7 +60,7 @@
     (document.head || document.documentElement).appendChild(sheetStyle);
 
     var WATCHED_TEXT = "Mark as watched";
-    var WATCHED_REMOVE_TEXT = "Mark as watched and remove from playlist";
+    var WATCHED_REMOVE_TEXT = "Mark watched & remove";
     var VIDEO_TYPES = ["videoRenderer","compactVideoRenderer","gridVideoRenderer","movieRenderer","compactMovieRenderer","reelItemRenderer","playlistVideoRenderer","compactPlaylistVideoRenderer","channelVideoPlayerRenderer","radioRenderer"];
 
     // YouTube is an SPA, so the URL can lag behind the response being modified.

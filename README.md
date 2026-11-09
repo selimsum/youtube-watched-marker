@@ -8,7 +8,7 @@ Install from Firefox Add-ons: https://addons.mozilla.org/firefox/addon/youtube-w
 
 - Adds a Firefox context menu item named **Mark as watched** on YouTube™ pages and links.
 - Adds **Mark as watched** to YouTube™'s own video three-dot menus.
-- Adds **Mark as watched and remove from playlist** to those menus on playlist pages only, including Watch Later. It queues the video and reuses YouTube™'s own remove command, so the row disappears and the undo snackbar still works.
+- Adds **Mark watched & remove** to those menus on playlist pages only, including Watch Later. It queues the video and reuses YouTube™'s own remove command, so the row disappears and the undo snackbar still works.
 - Extracts video IDs from `youtube.com/watch?v=...`, `youtube.com/shorts/...`, `youtube.com/embed/...`, `youtube.com/live/...`, and `youtu.be/...`.
 - Stores each video once in a local queue.
 - Opens one queued video at a time in a dedicated worker browser window.
@@ -37,7 +37,7 @@ Install from Firefox Add-ons: https://addons.mozilla.org/firefox/addon/youtube-w
 
 - The context menu appears on YouTube™ watch pages, YouTube™ links, and `youtu.be` links.
 - YouTube™ video three-dot menus include **Mark as watched**.
-- Playlist pages, including `youtube.com/playlist?list=WL`, also include **Mark as watched and remove from playlist**; it queues the video and removes the row. Other pages show only **Mark as watched**.
+- Playlist pages, including `youtube.com/playlist?list=WL`, also include **Mark watched & remove**; it queues the video and removes the row. Other pages show only **Mark as watched**.
 - Unsupported links do not create queue entries.
 - The popup shows queued items after it is closed and reopened.
 - The popup channel timeframe scanner accepts `DD.MM.YYYY`, `D.M.YYYY`, and `YYYY-MM-DD`, normalizes reversed ranges, and queues matching channel videos.

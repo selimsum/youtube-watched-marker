@@ -6,9 +6,13 @@ const CHANNEL_SCAN_RECENT_OLDER_COUNT = 8;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const WATCHED_ITEM_TEXT = 'Mark as watched';
-// Contains WATCHED_ITEM_TEXT as a substring, so handlers that branch on the
-// label must test this one first.
-const WATCHED_REMOVE_ITEM_TEXT = 'Mark as watched and remove from playlist';
+const WATCHED_REMOVE_ITEM_TEXT = 'Mark watched & remove';
+
+// The two labels do not share a substring, so anything that acts on either
+// entry has to test both.
+function isWatchedItemText(text) {
+  return text.includes(WATCHED_ITEM_TEXT) || text.includes(WATCHED_REMOVE_ITEM_TEXT);
+}
 
 const CONTAINER_CACHE = new WeakMap();
 
@@ -1033,7 +1037,7 @@ document.addEventListener("click", rememberMenuTarget, true);
 document.addEventListener('pointerdown', (e) => {
   const item = e.target.closest('ytd-menu-service-item-renderer, yt-list-item-view-model');
   if (!item) return;
-  if (!item.textContent.includes(WATCHED_ITEM_TEXT)) return;
+  if (!isWatchedItemText(item.textContent)) return;
   if (!canOpenWorkerWindow) return;
   const url = lastMenuVideoUrl || getFallbackVideoUrl();
   if (!url) return;
