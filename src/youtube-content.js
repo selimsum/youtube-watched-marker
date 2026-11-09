@@ -6,6 +6,9 @@ const CHANNEL_SCAN_RECENT_OLDER_COUNT = 8;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const WATCHED_ITEM_TEXT = 'Mark as watched';
+// Contains WATCHED_ITEM_TEXT as a substring, so handlers that branch on the
+// label must test this one first.
+const WATCHED_REMOVE_ITEM_TEXT = 'Mark as watched and remove from playlist';
 
 const CONTAINER_CACHE = new WeakMap();
 
@@ -993,15 +996,32 @@ function closeYouTubeMenu() {
   });
 }
 
-function handleWatchedClick() {
+function getWatchedTarget() {
   const url = lastMenuVideoUrl || getFallbackVideoUrl();
-  const title = lastMenuVideoTitle || document.title.replace(/ - YouTube$/, "").trim();
+
   if (!url) {
-    closeYouTubeMenu();
-    return;
+    return null;
   }
-  enqueueDirectOpen(url, title).catch(console.error);
-  closeYouTubeMenu();
+
+  return {
+    url,
+    title: lastMenuVideoTitle || document.title.replace(/ - YouTube$/, "").trim()
+  };
+}
+
+// The playlist item carries YouTube's own remove-from-playlist command, so its
+// click has to keep travelling into the page: closing the menu here would drop
+// that command before YouTube runs it.
+function handleWatchedClick(leaveMenuOpen) {
+  const target = getWatchedTarget();
+
+  if (target) {
+    enqueueDirectOpen(target.url, target.title).catch(console.error);
+  }
+
+  if (!leaveMenuOpen) {
+    closeYouTubeMenu();
+  }
 }
 
 document.addEventListener("pointerdown", rememberMenuTarget, true);
@@ -1030,10 +1050,14 @@ document.addEventListener('pointerdown', (e) => {
 document.addEventListener('click', (e) => {
   const item = e.target.closest('ytd-menu-service-item-renderer, yt-list-item-view-model');
   if (!item) return;
+  if (item.textContent.includes(WATCHED_REMOVE_ITEM_TEXT)) {
+    handleWatchedClick(true);
+    return;
+  }
   if (item.textContent.includes(WATCHED_ITEM_TEXT)) {
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
-    handleWatchedClick();
+    handleWatchedClick(false);
   }
 }, true);

@@ -60,7 +60,22 @@
     (document.head || document.documentElement).appendChild(sheetStyle);
 
     var WATCHED_TEXT = "Mark as watched";
+    var WATCHED_REMOVE_TEXT = "Mark as watched and remove from playlist";
     var VIDEO_TYPES = ["videoRenderer","compactVideoRenderer","gridVideoRenderer","movieRenderer","compactMovieRenderer","reelItemRenderer","playlistVideoRenderer","compactPlaylistVideoRenderer","channelVideoPlayerRenderer","radioRenderer"];
+
+    // YouTube is an SPA, so the URL can lag behind the response being modified.
+    // The renderer-level playlist fields are the primary signal; this is the
+    // fallback for menus that arrive before the address bar updates.
+    function isPlaylistPage() {
+      return location.pathname.replace(/\/+$/, "") === "/playlist";
+    }
+
+    function parentIsPlaylistItem(obj) {
+      if (!obj || typeof obj !== "object") return false;
+      if (typeof obj.playlistSetVideoId === "string" && obj.playlistSetVideoId) return true;
+      return typeof obj.playlistId === "string" && obj.playlistId &&
+        typeof obj.videoId === "string" && obj.videoId;
+    }
 
     function isSelectionMenu(items) {
       if (!Array.isArray(items)) return false;
@@ -124,39 +139,111 @@
       return false;
     }
 
-    function injectItem(items) {
-      if (!Array.isArray(items)) return;
-      var found = false;
-      for (var x = 0; x < items.length; x++) {
-        var sv = items[x] && (items[x].menuServiceItemRenderer || items[x].listItemViewModel);
-        if (!sv) continue;
-        var txt = sv.text || (sv.title && sv.title.content);
-        var runs = txt && txt.runs;
-        var match = runs ? runs[0] && runs[0].text === WATCHED_TEXT : txt === WATCHED_TEXT;
-        if (match) { found = true; break; }
+    // Reusing YouTube's own remove command keeps the API shape, the row
+    // removal and the undo snackbar working without any request code here.
+    // Returns the command wrapper, not the inner endpoint, because that is what
+    // serviceEndpoint and onTap.innertubeCommand both expect.
+    function findRemovePlaylistCommand(value, depth) {
+      if (!value || typeof value !== "object" || depth > 8) return null;
+      var edit = value.playlistEditEndpoint;
+      if (edit && Array.isArray(edit.actions)) {
+        for (var i = 0; i < edit.actions.length; i++) {
+          var action = edit.actions[i] && edit.actions[i].action;
+          if (typeof action === "string" && action.indexOf("REMOVE") !== -1) return value;
+        }
       }
-      if (found) return;
-      if (items[0] && items[0].menuServiceItemRenderer) {
-        items.push({menuServiceItemRenderer:{text:{runs:[{text:WATCHED_TEXT}]},icon:{iconType:"CHECK"},trackingParams:"Cg==",serviceEndpoint:{commandMetadata:{webCommandMetadata:{sendPost:false,apiUrl:""}}}}});
-      } else if (items[0] && items[0].listItemViewModel) {
-        debugLog("ytwm: injecting listItemViewModel into sheet menu");
-        var baseCtx = items[0].listItemViewModel.rendererContext;
-        var newItem = {listItemViewModel:{title:{content:WATCHED_TEXT},leadingImage:{sources:[{clientResource:{imageName:"CHECK"}}]}}};
-        if (baseCtx) newItem.listItemViewModel.rendererContext = JSON.parse(JSON.stringify(baseCtx));
-        items.push(newItem);
+      var keys = Object.keys(value);
+      for (var k = 0; k < keys.length; k++) {
+        var child = value[keys[k]];
+        if (child && typeof child === "object") {
+          var nested = findRemovePlaylistCommand(child, depth + 1);
+          if (nested) return nested;
+        }
       }
+      return null;
     }
 
-    function injectInto(val, visited, inVideoContext) {
+    function findRemovePlaylistCommandInMenu(items) {
+      for (var i = 0; i < items.length; i++) {
+        var command = findRemovePlaylistCommand(items[i], 0);
+        if (command) return command;
+      }
+      return null;
+    }
+
+    function menuItemLabel(entry) {
+      var sv = entry && (entry.menuServiceItemRenderer || entry.listItemViewModel);
+      if (!sv) return null;
+      var txt = sv.text || (sv.title && sv.title.content);
+      var runs = txt && txt.runs;
+      if (runs) return (runs[0] && runs[0].text) || null;
+      return typeof txt === "string" ? txt : null;
+    }
+
+    function cloneJson(value) {
+      try { return JSON.parse(JSON.stringify(value)); } catch (e) { return null; }
+    }
+
+    function buildServiceItem(label, removeCommand) {
+      return {menuServiceItemRenderer:{
+        text:{runs:[{text:label}]},
+        icon:{iconType:"CHECK"},
+        trackingParams:"Cg==",
+        serviceEndpoint: removeCommand
+          ? cloneJson(removeCommand)
+          : {commandMetadata:{webCommandMetadata:{sendPost:false,apiUrl:""}}}
+      }};
+    }
+
+    function buildListItem(baseCtx, label, removeCommand) {
+      var viewModel = {title:{content:label},leadingImage:{sources:[{clientResource:{imageName:"CHECK"}}]}};
+      if (baseCtx) viewModel.rendererContext = cloneJson(baseCtx);
+      if (removeCommand) viewModel.onTap = {innertubeCommand: cloneJson(removeCommand)};
+      return {listItemViewModel:viewModel};
+    }
+
+    function injectItem(items, inPlaylistContext) {
+      if (!Array.isArray(items) || items.length === 0) return;
+      var hasWatched = false;
+      var hasWatchedRemove = false;
+      for (var x = 0; x < items.length; x++) {
+        var label = menuItemLabel(items[x]);
+        if (label === WATCHED_TEXT) hasWatched = true;
+        if (label === WATCHED_REMOVE_TEXT) hasWatchedRemove = true;
+      }
+      var first = items[0];
+      var isServiceMenu = Boolean(first && first.menuServiceItemRenderer);
+      var isListMenu = !isServiceMenu && Boolean(first && first.listItemViewModel);
+      if (!isServiceMenu && !isListMenu) return;
+      var baseCtx = isListMenu ? first.listItemViewModel.rendererContext : null;
+
+      function push(label, removeCommand) {
+        items.push(isServiceMenu
+          ? buildServiceItem(label, removeCommand)
+          : buildListItem(baseCtx, label, removeCommand));
+      }
+
+      if (!hasWatched) push(WATCHED_TEXT, null);
+      if (hasWatchedRemove) return;
+      if (!inPlaylistContext && !isPlaylistPage()) return;
+      var removeCommand = findRemovePlaylistCommandInMenu(items);
+      if (!removeCommand) return;
+      debugLog("ytwm: injecting playlist remove item");
+      push(WATCHED_REMOVE_TEXT, removeCommand);
+    }
+
+    function injectInto(val, visited, inVideoContext, inPlaylistContext) {
       if (!val || typeof val !== "object" || visited.has(val)) return;
       visited.add(val);
+
+      var playlistContext = Boolean(inPlaylistContext) || parentIsPlaylistItem(val);
 
       // Direct checks for known video menu locations only.
       // NOTE: comment menus and playlist "Sort by" sheets are intentionally
       // excluded — they are not tied to a single video.
       if (val.videoActions && val.videoActions.menuRenderer && Array.isArray(val.videoActions.menuRenderer.items)) {
         if (!isSelectionMenu(val.videoActions.menuRenderer.items)) {
-          injectItem(val.videoActions.menuRenderer.items);
+          injectItem(val.videoActions.menuRenderer.items, playlistContext);
         }
       }
       if (val.lockupViewModel) {
@@ -170,7 +257,7 @@
         if (cur && Array.isArray(cur.listItems)) {
           debugLog("ytwm: lockupViewModel direct handler hit, listItems length:", cur.listItems.length);
           if (!isSelectionMenu(cur.listItems) && lockupHasVideoSignal(val.lockupViewModel)) {
-            injectItem(cur.listItems);
+            injectItem(cur.listItems, playlistContext);
           }
         }
       }
@@ -186,20 +273,23 @@
         var keyVideoContext = childVideoContext ||
           VIDEO_TYPES.indexOf(key) !== -1 ||
           (key === "lockupViewModel" && lockupHasVideoSignal(child));
+        var keyPlaylistContext = playlistContext ||
+          key === "playlistVideoRenderer" ||
+          key === "compactPlaylistVideoRenderer";
         if (Array.isArray(child) && child.length > 0) {
           var isMenu = false;
           for (var ci = 0; ci < child.length && ci < 3; ci++) {
             if (child[ci] && (child[ci].menuServiceItemRenderer || child[ci].listItemViewModel)) { isMenu = true; break; }
           }
-          if (isMenu && keyVideoContext && !isSelectionMenu(child)) injectItem(child);
+          if (isMenu && keyVideoContext && !isSelectionMenu(child)) injectItem(child, keyPlaylistContext);
         }
-        if (child && typeof child === "object") injectInto(child, visited, keyVideoContext);
+        if (child && typeof child === "object") injectInto(child, visited, keyVideoContext, keyPlaylistContext);
       }
     }
 
     function modify(js) {
       debugLog("ytwm: modify called", js && typeof js, Array.isArray(js));
-      injectInto(js, new WeakSet());
+      injectInto(js, new WeakSet(), false, false);
     }
     // Inject into ytInitialData right now if it already exists
     if (window.ytInitialData) {
