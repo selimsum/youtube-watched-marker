@@ -1,6 +1,7 @@
 "use strict";
 
 const VIDEO_ID_PATTERN = /^[a-zA-Z0-9_-]{11}$/;
+const PLAYLIST_ID_PATTERN = /^[a-zA-Z0-9_-]{2,64}$/;
 
 const DEFAULT_WORKER_WINDOW_SIZE = {
   width: 1280,
@@ -75,4 +76,21 @@ function buildWatchUrl(videoId) {
 function buildWorkerUrl(rawUrl) {
   const videoId = extractVideoIdFromUrl(rawUrl);
   return videoId ? buildWatchUrl(videoId) : null;
+}
+
+function extractPlaylistIdFromUrl(rawUrl) {
+  const url = normalizeUrl(rawUrl);
+
+  if (!url || !isYouTubeHost(url.hostname)) {
+    return null;
+  }
+
+  const playlistId = url.searchParams.get("list");
+  return playlistId && PLAYLIST_ID_PATTERN.test(playlistId) ? playlistId : null;
+}
+
+function buildPlaylistUrl(playlistId) {
+  const url = new URL("https://www.youtube.com/playlist");
+  url.searchParams.set("list", playlistId);
+  return url.toString();
 }

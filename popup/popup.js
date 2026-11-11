@@ -19,6 +19,9 @@ const channelTodayButton = document.getElementById("channelTodayButton");
 const channelOldestButton = document.getElementById("channelOldestButton");
 const scanChannelButton = document.getElementById("scanChannelButton");
 const channelScanStatus = document.getElementById("channelScanStatus");
+const markPlaylistButton = document.getElementById("markPlaylistButton");
+const cancelPlaylistButton = document.getElementById("cancelPlaylistButton");
+const playlistStatus = document.getElementById("playlistStatus");
 const pauseButton = document.getElementById("pauseButton");
 const resetWindowButton = document.getElementById("resetWindowButton");
 const saveWindowButton = document.getElementById("saveWindowButton");
@@ -30,6 +33,8 @@ const exportDebugButton = document.getElementById("exportDebugButton");
 let debugVisible = false;
 let currentSettings = {};
 let currentQueue = [];
+let currentPlaylistJob = null;
+let playlistScanning = false;
 
 function formatDate(value) {
   const date = new Date(value);
@@ -272,6 +277,139 @@ async function scanChannelTimeframe() {
   }
 }
 
+function setPlaylistStatus(text) {
+  playlistStatus.textContent = text;
+}
+
+const PLAYLIST_SCAN_ERRORS = {
+  "not-playlist-page": "This tab is not a YouTube™ playlist page.",
+  "playlist-not-ready": "The playlist page did not finish opening. Try again.",
+  "playlist-videos-not-loaded": "No videos loaded. Scroll the playlist once, then try again.",
+  "content-script-not-ready": "Reload the playlist page, then try again.",
+  "empty-playlist": "This playlist has no available videos to mark."
+};
+
+function describePlaylistError(code) {
+  return PLAYLIST_SCAN_ERRORS[code] || `Playlist scan failed: ${code || "unknown-error"}`;
+}
+
+// After tabs.update the old document can still answer, so retry until the tab
+// reports the playlist we actually asked for.
+async function requestPlaylistScan(tabId, playlistId) {
+  let result = null;
+
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    result = await sendTabMessageWithRetry(tabId, {
+      type: "scan-playlist-videos",
+      playlistId
+    });
+
+    if (!result || result.error !== "playlist-not-ready") {
+      return result;
+    }
+
+    await delay(500);
+  }
+
+  return result;
+}
+
+async function markPlaylistAsWatched() {
+  markPlaylistButton.disabled = true;
+  playlistScanning = true;
+  setPlaylistStatus("Opening playlist...");
+
+  try {
+    const tab = await getActiveYouTubeTab();
+    const playlistId = tab && extractPlaylistIdFromUrl(tab.url);
+
+    if (!tab || !tab.id || !playlistId) {
+      setPlaylistStatus("Open a YouTube™ playlist page first.");
+      return;
+    }
+
+    const playlistUrl = buildPlaylistUrl(playlistId);
+
+    if (tab.url !== playlistUrl) {
+      await extensionApi.tabs.update(tab.id, {
+        url: playlistUrl,
+        active: true
+      });
+      await waitForTabComplete(tab.id);
+      await delay(700);
+    }
+
+    setPlaylistStatus("Loading playlist videos...");
+    const scanResult = await requestPlaylistScan(tab.id, playlistId);
+
+    if (!scanResult || scanResult.ok === false) {
+      setPlaylistStatus(describePlaylistError(scanResult && scanResult.error));
+      return;
+    }
+
+    const response = await extensionApi.runtime.sendMessage({
+      type: "start-playlist-job",
+      playlistId: scanResult.playlistId,
+      playlistUrl: scanResult.playlistUrl,
+      title: scanResult.title,
+      videos: scanResult.videos || []
+    });
+
+    if (!response || response.ok === false) {
+      setPlaylistStatus(describePlaylistError(response && response.error));
+      return;
+    }
+
+    playlistScanning = false;
+    renderQueue(response.queue || [], response.playlistJob);
+  } catch (error) {
+    setPlaylistStatus(describePlaylistError(error && error.message));
+  } finally {
+    playlistScanning = false;
+    markPlaylistButton.disabled = false;
+  }
+}
+
+async function cancelPlaylistJob() {
+  const hadBacklog = Boolean(currentPlaylistJob && currentPlaylistJob.videos.length);
+  const response = await extensionApi.runtime.sendMessage({
+    type: "cancel-playlist-job"
+  });
+
+  renderQueue(response.queue || [], null);
+  setPlaylistStatus(hadBacklog
+    ? "Stopped adding playlist videos. Already queued videos are kept."
+    : "Playlist progress dismissed.");
+}
+
+function renderPlaylistProgress() {
+  // A scan in flight owns the status line; queue updates from the running worker
+  // would otherwise overwrite its progress with the previous job's numbers.
+  if (playlistScanning) {
+    return;
+  }
+
+  const job = currentPlaylistJob;
+
+  if (!job) {
+    cancelPlaylistButton.hidden = true;
+    return;
+  }
+
+  const remaining = job.videos.length;
+  const done = currentQueue.filter((item) => (
+    item.playlistId === job.playlistId &&
+    (item.status === "completed" || item.status === "failed")
+  )).length;
+  const name = job.title || job.playlistId;
+
+  cancelPlaylistButton.hidden = false;
+  cancelPlaylistButton.textContent = remaining ? "Cancel" : "Dismiss";
+  setPlaylistStatus(remaining
+    ? `${name}: ${job.total - remaining}/${job.total} queued, ${done} done`
+    : `${name}: all ${job.total} queued, ${done} done`);
+}
+
 function createQueueNode(item) {
   const node = document.createElement("li");
   node.className = `queue-item queue-item-${item.status}`;
@@ -405,8 +543,9 @@ function itemSignature(item) {
   ].join("|");
 }
 
-function renderQueue(queue) {
+function renderQueue(queue, playlistJob = currentPlaylistJob) {
   currentQueue = queue;
+  currentPlaylistJob = playlistJob;
   document.body.classList.toggle("debug-visible", debugVisible);
 
   // Rebuild only rows whose content changed, so scroll position and focus
@@ -450,6 +589,8 @@ function renderQueue(queue) {
   if (clearButton.disabled) {
     disarmClear();
   }
+
+  renderPlaylistProgress();
 }
 
 function getQueueSummary(queue) {
@@ -474,7 +615,7 @@ async function loadQueue() {
     type: "get-queue"
   });
 
-  renderQueue(response.queue || []);
+  renderQueue(response.queue || [], response.playlistJob || null);
 }
 
 async function loadSettings() {
@@ -524,7 +665,7 @@ async function clearQueue() {
     type: "clear-queue"
   });
 
-  renderQueue(response.queue || []);
+  renderQueue(response.queue || [], null);
 }
 
 async function retryItem(itemId) {
@@ -698,9 +839,21 @@ scanChannelButton.addEventListener("click", () => {
   scanChannelTimeframe().catch(console.error);
 });
 
+markPlaylistButton.addEventListener("click", () => {
+  markPlaylistAsWatched().catch(console.error);
+});
+
+cancelPlaylistButton.addEventListener("click", () => {
+  cancelPlaylistJob().catch(console.error);
+});
+
 extensionApi.runtime.onMessage.addListener((message) => {
   if (message && message.type === "queue-updated") {
     loadQueue().catch(console.error);
+  }
+
+  if (message && message.type === "playlist-scan-progress") {
+    setPlaylistStatus(`Loading playlist videos... ${message.scanned} found`);
   }
 });
 

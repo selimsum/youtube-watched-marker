@@ -4,6 +4,7 @@ const PAGE_MENU_ID = "mark-youtube-page-watched";
 const LINK_MENU_ID = "mark-youtube-link-watched";
 const MENU_IDS = [PAGE_MENU_ID, LINK_MENU_ID];
 const STORAGE_KEY = "watchQueue";
+const PLAYLIST_JOB_KEY = "playlistJob";
 const WORKER_MODE_KEY = "workerMode";
 const WORKER_WINDOW_BOUNDS_KEY = "workerWindowBounds";
 const PLAYBACK_SECONDS_KEY = "playbackSeconds";
@@ -189,6 +190,163 @@ async function resetWorkerWindowBounds() {
 async function setQueue(queue) {
   queueCache = queue;
   await extensionApi.storage.local.set({ [STORAGE_KEY]: queue });
+}
+
+// undefined means "not read yet"; null means "no playlist job".
+let playlistJobCache;
+let playlistFeedInFlight = null;
+
+async function getPlaylistJob() {
+  if (playlistJobCache !== undefined) {
+    return playlistJobCache;
+  }
+
+  const result = await extensionApi.storage.local.get(PLAYLIST_JOB_KEY);
+  playlistJobCache = result[PLAYLIST_JOB_KEY] || null;
+
+  return playlistJobCache;
+}
+
+async function setPlaylistJob(job) {
+  playlistJobCache = job;
+
+  if (job) {
+    await extensionApi.storage.local.set({ [PLAYLIST_JOB_KEY]: job });
+  } else {
+    await extensionApi.storage.local.remove(PLAYLIST_JOB_KEY);
+  }
+}
+
+async function startPlaylistJob(playlist) {
+  const playlistId = playlist && playlist.playlistId;
+  const videos = playlist && playlist.videos;
+
+  if (!playlistId || !Array.isArray(videos) || !videos.length) {
+    return {
+      ok: false,
+      error: "empty-playlist"
+    };
+  }
+
+  const seen = new Set();
+  const backlog = [];
+
+  for (const video of videos) {
+    const videoId = video && video.videoId;
+
+    if (!videoId || seen.has(videoId)) {
+      continue;
+    }
+
+    seen.add(videoId);
+    backlog.push({
+      videoId,
+      url: video.url,
+      title: cleanTitle(video.title)
+    });
+  }
+
+  if (!backlog.length) {
+    return {
+      ok: false,
+      error: "empty-playlist"
+    };
+  }
+
+  await setPlaylistJob({
+    playlistId,
+    playlistUrl: playlist.playlistUrl || buildPlaylistUrl(playlistId),
+    title: cleanTitle(playlist.title),
+    total: backlog.length,
+    videos: backlog,
+    startedAt: new Date().toISOString()
+  });
+  await feedPlaylistJob();
+  await notifyQueueUpdated();
+
+  return {
+    ok: true,
+    playlistJob: await getPlaylistJob(),
+    queue: await getQueue()
+  };
+}
+
+// A playlist can hold far more videos than maxQueueSize allows, so the rest wait
+// in a stored backlog and slide into the queue as running items finish.
+async function runPlaylistFeed() {
+  const job = await getPlaylistJob();
+
+  if (!job || !job.videos.length) {
+    return 0;
+  }
+
+  const queue = await getQueue();
+  const settings = await getSettings();
+  const activeVideoIds = new Set();
+
+  for (const item of queue) {
+    if (item.status === "pending" || item.status === "running") {
+      activeVideoIds.add(item.videoId);
+    }
+  }
+
+  let availableSlots = Math.max(0, settings.maxQueueSize - getActiveQueueCount(queue));
+  const createdItems = [];
+  const remaining = [];
+
+  for (const video of job.videos) {
+    // Already pending or running, so it will be marked anyway. Drop it from the
+    // backlog instead of deferring it, or it would be queued a second time once
+    // the first copy finishes.
+    if (activeVideoIds.has(video.videoId)) {
+      continue;
+    }
+
+    if (availableSlots <= 0) {
+      remaining.push(video);
+      continue;
+    }
+
+    activeVideoIds.add(video.videoId);
+    availableSlots -= 1;
+    createdItems.push(createQueueItem(video.videoId, video.url, video.title, {
+      source: "playlist",
+      playlistId: job.playlistId,
+      playlistUrl: job.playlistUrl
+    }));
+  }
+
+  if (remaining.length === job.videos.length) {
+    return 0;
+  }
+
+  if (createdItems.length) {
+    await setQueue([...queue, ...createdItems]);
+  }
+
+  await setPlaylistJob({
+    ...job,
+    videos: remaining
+  });
+
+  return createdItems.length;
+}
+
+// processQueue runs from several places without awaiting, so two feeds could
+// otherwise read the same backlog and count the same videos twice.
+function feedPlaylistJob() {
+  if (!playlistFeedInFlight) {
+    playlistFeedInFlight = runPlaylistFeed().finally(() => {
+      playlistFeedInFlight = null;
+    });
+  }
+
+  return playlistFeedInFlight;
+}
+
+async function cancelPlaylistJob() {
+  await setPlaylistJob(null);
+  await notifyQueueUpdated();
 }
 
 function beginPreopenWorker(workerUrl) {
@@ -440,6 +598,7 @@ async function clearQueue() {
     retainedWorker = null;
   }
 
+  await setPlaylistJob(null);
   await setQueue([]);
 }
 
@@ -570,7 +729,15 @@ async function stopCurrentWorker() {
 
 async function hasPendingQueueItems() {
   const queue = await getQueue();
-  return queue.some((entry) => entry.status === "pending");
+
+  if (queue.some((entry) => entry.status === "pending")) {
+    return true;
+  }
+
+  // A playlist backlog refills the queue on the next processQueue pass, so the
+  // worker window is worth keeping even when the queue itself is momentarily empty.
+  const job = await getPlaylistJob();
+  return Boolean(job && job.videos.length);
 }
 
 async function retainWorkerForNextItem(worker) {
@@ -862,9 +1029,29 @@ async function handleRuntimeMessage(message) {
     return result;
   }
 
+  if (message.type === "start-playlist-job") {
+    const result = await startPlaylistJob(message);
+
+    if (result.ok) {
+      processQueue().catch(console.error);
+    }
+
+    return result;
+  }
+
+  if (message.type === "cancel-playlist-job") {
+    await cancelPlaylistJob();
+    return {
+      ok: true,
+      playlistJob: null,
+      queue: await getQueue()
+    };
+  }
+
   if (message.type === "get-queue") {
     return {
-      queue: await getQueue()
+      queue: await getQueue(),
+      playlistJob: await getPlaylistJob()
     };
   }
 
@@ -962,6 +1149,7 @@ async function handleRuntimeMessage(message) {
     return {
       exportedAt: new Date().toISOString(),
       settings: await getSettings(),
+      playlistJob: await getPlaylistJob(),
       queue: await getQueue()
     };
   }
@@ -1921,6 +2109,10 @@ async function resetStaleRunningItems() {
 }
 
 async function processQueue() {
+  if (await feedPlaylistJob()) {
+    await notifyQueueUpdated();
+  }
+
   if (activeWorker) {
     return;
   }

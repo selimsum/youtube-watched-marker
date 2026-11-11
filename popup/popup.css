@@ -201,6 +201,44 @@ button:disabled {
   white-space: normal;
 }
 
+.playlist-mark {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 0 0;
+}
+
+.playlist-mark h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.playlist-actions {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.playlist-actions button {
+  min-width: 0;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+#markPlaylistButton {
+  flex: 1 1 auto;
+}
+
+#cancelPlaylistButton {
+  flex: 0 0 auto;
+}
+
+.playlist-mark .settings-note {
+  white-space: normal;
+}
+
 .settings {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

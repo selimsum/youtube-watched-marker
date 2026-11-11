@@ -3,6 +3,11 @@
 const CHANNEL_SCAN_MAX_SCROLLS = 120;
 const CHANNEL_SCAN_STABLE_SCROLLS = 4;
 const CHANNEL_SCAN_RECENT_OLDER_COUNT = 8;
+const PLAYLIST_SCAN_MAX_SCROLLS = 200;
+const PLAYLIST_SCAN_STABLE_SCROLLS = 5;
+const PLAYLIST_SCAN_SCROLL_DELAY_MS = 900;
+const PLAYLIST_ROWS_WAIT_ATTEMPTS = 30;
+const PLAYLIST_ROWS_WAIT_INTERVAL_MS = 400;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const WATCHED_ITEM_TEXT = 'Mark as watched';
@@ -170,6 +175,10 @@ extensionApi.runtime.onMessage.addListener((message) => {
   if (message && message.type === "scan-channel-timeframe") {
     return scanChannelTimeframe(message.range);
   }
+
+  if (message && message.type === "scan-playlist-videos") {
+    return scanPlaylistVideos(message.playlistId);
+  }
 });
 
 function isChannelVideosPage() {
@@ -252,6 +261,149 @@ async function scanChannelTimeframe(range) {
     matched: matchedVideos.length,
     skippedUnparseable: unparseableVideoIds.size,
     videos: matchedVideos
+  };
+}
+
+function isPlaylistPage() {
+  return window.location.pathname.replace(/\/+$/, "") === "/playlist";
+}
+
+// The 2025 redesign replaced ytd-playlist-video-list-renderer with
+// yt-section-list-renderer, whose continuation items append further
+// yt-item-section-renderer siblings. Scope to the section list so later
+// continuations stay inside the root and unrelated shelves stay outside it.
+function getPlaylistVideoListRoot() {
+  const selectors = [
+    "ytd-playlist-video-list-renderer",
+    "yt-section-list-renderer",
+    "ytd-item-section-renderer",
+    "yt-item-section-renderer"
+  ];
+
+  for (const selector of selectors) {
+    const root = document.querySelector(selector);
+    if (root) return root;
+  }
+
+  return document.documentElement;
+}
+
+function findPlaylistTitle() {
+  const header = document.querySelector("ytd-playlist-header-renderer");
+  const text = getElementTitle(header && header.querySelector("#playlist-name"));
+
+  return text || document.title.replace(/ - YouTube$/, "").trim();
+}
+
+function collectPlaylistVideos(videosById) {
+  for (const container of getVideoContainers(getPlaylistVideoListRoot())) {
+    const url = findVideoUrlInContainer(container);
+    const videoId = extractVideoIdFromUrl(url);
+
+    if (!videoId || videosById.has(videoId)) {
+      continue;
+    }
+
+    videosById.set(videoId, {
+      videoId,
+      url,
+      title: findVideoTitleInContainer(container)
+    });
+  }
+}
+
+// Rows can arrive well after the tab reports "complete", so an empty first pass
+// must not be mistaken for a finished scan. Wait for real rows before the
+// stable-scroll budget starts counting.
+async function waitForPlaylistRows(videosById) {
+  for (let attempt = 0; attempt < PLAYLIST_ROWS_WAIT_ATTEMPTS; attempt += 1) {
+    collectPlaylistVideos(videosById);
+
+    if (videosById.size) {
+      return true;
+    }
+
+    window.scrollTo({
+      top: document.documentElement.scrollHeight,
+      behavior: "auto"
+    });
+    await delay(PLAYLIST_ROWS_WAIT_INTERVAL_MS);
+  }
+
+  collectPlaylistVideos(videosById);
+  return videosById.size > 0;
+}
+
+// Playlist rows arrive in continuations of roughly 100, so a long playlist needs
+// many scrolls. Collecting into a Map on every pass keeps videos already seen
+// even if YouTube later recycles their rows.
+async function scanPlaylistVideos(expectedPlaylistId) {
+  const playlistId = extractPlaylistIdFromUrl(window.location.href);
+
+  if (!isPlaylistPage() || !playlistId) {
+    return {
+      ok: false,
+      error: "not-playlist-page"
+    };
+  }
+
+  // The popup may have just navigated this tab; a stale content script from the
+  // previous document must not scan the wrong playlist.
+  if (expectedPlaylistId && playlistId !== expectedPlaylistId) {
+    return {
+      ok: false,
+      error: "playlist-not-ready"
+    };
+  }
+
+  const videosById = new Map();
+
+  if (!await waitForPlaylistRows(videosById)) {
+    return {
+      ok: false,
+      error: "playlist-videos-not-loaded",
+      playlistId
+    };
+  }
+
+  let stableScrolls = 0;
+  let previousCount = 0;
+
+  for (let scrollCount = 0; scrollCount < PLAYLIST_SCAN_MAX_SCROLLS; scrollCount += 1) {
+    collectPlaylistVideos(videosById);
+
+    if (videosById.size === previousCount) {
+      stableScrolls += 1;
+    } else {
+      stableScrolls = 0;
+      previousCount = videosById.size;
+      extensionApi.runtime.sendMessage({
+        type: "playlist-scan-progress",
+        playlistId,
+        scanned: videosById.size
+      }).catch(() => {});
+    }
+
+    if (stableScrolls >= PLAYLIST_SCAN_STABLE_SCROLLS) {
+      break;
+    }
+
+    window.scrollTo({
+      top: document.documentElement.scrollHeight,
+      behavior: "auto"
+    });
+    await delay(PLAYLIST_SCAN_SCROLL_DELAY_MS);
+  }
+
+  collectPlaylistVideos(videosById);
+
+  return {
+    ok: true,
+    playlistId,
+    playlistUrl: buildPlaylistUrl(playlistId),
+    title: findPlaylistTitle(),
+    scanned: videosById.size,
+    videos: Array.from(videosById.values())
   };
 }
 

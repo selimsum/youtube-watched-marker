@@ -17,6 +17,8 @@ Install from Firefox Add-ons: https://addons.mozilla.org/firefox/addon/youtube-w
 - Starts playback in the worker browser window, then returns focus to the previous tab while the 5-second run continues.
 - Shows the queue in the extension popup.
 - Adds a popup channel timeframe scanner that queues videos from the active channel Videos page between two entered dates.
+- Adds a popup **Mark playlist as watched** action that loads every video in the open playlist, including Watch Later, and queues them in playlist order.
+- Keeps playlist videos beyond the active queue limit in a stored backlog that refills the queue as earlier videos finish, so playlists of any size work without raising the limit. The popup shows `queued / total` progress with a cancel button, and the backlog survives a browser restart.
 - Shows video titles in the popup when YouTube™ exposes them.
 - Marks each local queue item as `pending`, `running`, `completed`, or `failed`.
 - Lets you retry or remove individual completed/failed queue items.
@@ -41,6 +43,9 @@ Install from Firefox Add-ons: https://addons.mozilla.org/firefox/addon/youtube-w
 - Unsupported links do not create queue entries.
 - The popup shows queued items after it is closed and reopened.
 - The popup channel timeframe scanner accepts `DD.MM.YYYY`, `D.M.YYYY`, and `YYYY-MM-DD`, normalizes reversed ranges, and queues matching channel videos.
+- The popup Playlist section reports how many videos it found while loading a long playlist, then marks every video in it.
+- A playlist larger than the active queue limit keeps draining as items complete, and the active count never exceeds the limit.
+- Cancelling a playlist stops adding the remaining videos but keeps the ones already queued; **Clear** drops both the queue and the backlog.
 - Completed/failed queue items can be retried or removed individually.
 - The clear button removes all queued items, while the cleanup buttons remove only completed or failed items.
 - Pausing the queue allows new items to be added without starting worker playback until the queue is resumed.
