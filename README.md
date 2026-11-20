@@ -24,9 +24,19 @@ Install from Firefox Add-ons: https://addons.mozilla.org/firefox/addon/youtube-w
 - Lets you retry or remove individual completed/failed queue items.
 - Includes a popup debug toggle for playback event timelines and an export button for a JSON debug log.
 - Includes popup controls for worker mode, playback seconds, seek distance from the end, stopping the active worker (which also pauses the queue so the next item does not start), retrying failed items, and clearing completed/failed items.
-- Includes a queue pause/resume control and a configurable active queue limit.
+- Includes a queue pause/resume control and a configurable active queue limit (`pending` + `running`).
+- Includes a separate **Saved queue limit** for the total number of items kept in the queue history. When the queue grows past it, the oldest finished (`completed`/`failed`) items are removed automatically on every queue write, when the limit is lowered, and at browser startup. the default cap is `100` and `0` keeps everything; `pending`, `running` and the item with a live worker are never removed, so a busy queue can temporarily sit above the limit.
+- Keeps playlist progress counts on the playlist job itself, so trimming finished items does not lose a long playlist's `done` count.
 - Includes reset/save buttons for the remembered worker window bounds.
 - Uses a stable Firefox add-on ID: `youtube-watched-marker@hayalet`.
+
+## Popup layout
+
+- The status card is always visible first. It shows whether the queue is working, paused, needs attention, or is empty, with progress and the current video. Its main button pauses/resumes or retries, and a compact version stays visible on the Add tab.
+- **Queue** tab: filter by All / Pending / Watched / Failed, with contextual **Retry failed** and **Clear finished** actions. Queue items lead with the video title; the video ID and source URL remain in the item tooltip.
+- **Add videos** tab: mark the open playlist as watched, scan a YouTube channel by date range, or watch backlog progress and cancel a running playlist job.
+- **Settings** (gear): playback duration, start-near-end offset, active queue limit, saved queue limit, and playback window. Debug timeline, log export, failed-item cleanup and clear-all sit under **Advanced**.
+- **Clear all** in the footer asks for confirmation before removing the queue and backlog.
 
 ## Load in Firefox
 
@@ -51,6 +61,11 @@ Install from Firefox Add-ons: https://addons.mozilla.org/firefox/addon/youtube-w
 - Pausing the queue allows new items to be added without starting worker playback until the queue is resumed.
 - The max queue size applies to active items: `pending` plus `running`.
 - The active queue limit can be raised up to 500 for larger channel timeframe scans.
+- With the saved queue limit set to a small number, adding videos keeps only the newest items, removes the oldest `completed`/`failed` ones, and never drops `pending`/`running` items.
+- Lowering the saved queue limit trims the existing queue immediately, and an oversized queue is trimmed again after a browser restart.
+- The saved queue limit defaults to `100`; an existing queue is trimmed down to it on the next background start.
+- Setting the saved queue limit to `0` keeps the full queue history.
+- Playlist `done` counts stay correct even when finished items have been trimmed by the saved queue limit.
 - A queued item briefly opens a muted worker window and then changes status.
 
 ## Development checks

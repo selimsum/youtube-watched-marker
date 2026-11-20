@@ -1,124 +1,178 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>YouTube™ Watched Marker</title>
-    <link rel="stylesheet" href="popup.css">
-  </head>
-  <body>
-    <main class="popup">
-      <header class="header">
-        <div>
-          <h1>Watch Queue</h1>
-          <p id="summary">Loading...</p>
-        </div>
-        <div class="header-actions">
-          <button id="optionsToggle" type="button" aria-expanded="false" aria-controls="settingsPanel" title="Show playback, queue, and worker-window settings.">Options</button>
-          <button id="debugToggle" type="button" aria-pressed="false" title="Show detailed worker timing and playback events for each queue item.">Debug</button>
-          <button id="clearButton" type="button" title="Remove every queue item and stop the active worker if one is running.">Clear</button>
-        </div>
-      </header>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YouTube™ Watched Marker</title>
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+<svg class="sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h12M9 12h12M9 18h12M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5l11 7-11 7V5z"/></symbol>
+  <symbol id="i-retry" viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.8-6.3L3 8"/><path d="M3 3v5h5"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3L2.5 20h19L12 3z"/><path d="M12 9v5M12 17h.01"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-chev-l" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+  <symbol id="i-chev-d" viewBox="0 0 24 24"><path d="M5 9l7 7 7-7"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 11l5 5 5-5M4 20h16"/></symbol>
+  <symbol id="i-stack" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="5" rx="1.5"/><rect x="3" y="10.5" width="18" height="5" rx="1.5"/><path d="M3 18h11"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l1.9 5.4L19 10l-5.1 1.6L12 17l-1.9-5.4L5 10l5.1-1.6L12 3z"/></symbol>
+</svg>
 
-      <section id="emptyState" class="empty" hidden>
-        No queued videos yet.
+<main class="popup" id="popupRoot">
+  <header class="pop-head">
+    <svg class="logo" viewBox="0 0 96 96" aria-hidden="true"><rect x="4" y="6" width="88" height="68" rx="20" fill="#ef233c"/><path d="M40 29v22l20-11-20-11z" fill="#fff"/><circle cx="68" cy="70" r="24" fill="#111827"/><path d="M57 70.4l7.6 7.6 15.6-18" fill="none" stroke="#fff" stroke-width="6.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <div class="brand-name"><b>Watched Marker</b><span>Simulated playback queue</span></div>
+    <div class="head-spacer"></div>
+    <button class="head-btn" id="optionsToggle" type="button" aria-label="Settings" aria-controls="settingsPanel" aria-expanded="false" title="Playback and queue settings"><svg class="ic"><use href="#i-sliders"></use></svg></button>
+  </header>
+
+  <section class="hero" id="hero" data-tone="idle" aria-live="polite">
+    <div class="hero-mini">
+      <span class="pulse"></span><b id="miniEyebrow">All clear</b>
+      <span class="mini-detail" id="miniDetail"></span>
+      <button class="mini-action" id="miniAction" type="button">Add</button>
+    </div>
+    <div class="hero-top"><span class="pulse"></span><span id="heroEyebrow">All clear</span><span class="count" id="heroCount"></span></div>
+    <h3 id="heroTitle">Nothing in the queue</h3>
+    <p class="detail" id="summary">Loading...</p>
+    <div class="progress" id="heroProgress"><i id="heroBar" style="width:0%"></i></div>
+    <div class="hero-now" id="heroNow"><svg class="ic"><use href="#i-info"></use></svg><strong id="heroNowText"></strong><em id="heroNowExtra"></em></div>
+    <div class="hero-tip" id="heroTip"><svg class="ic"><use href="#i-info"></use></svg><span>Videos you mark on YouTube appear here. The queue keeps its progress after a browser restart.</span></div>
+    <div class="hero-actions">
+      <button class="btn btn-primary" id="heroPrimary" type="button">Add videos</button>
+      <button class="btn btn-quiet" id="heroSecondary" type="button" hidden>Stop</button>
+      <button class="btn btn-quiet" id="heroFailView" type="button" hidden>View failed</button>
+    </div>
+  </section>
+
+  <nav class="tabs" role="tablist" aria-label="Popup sections">
+    <button class="tab on" id="tabQueue" type="button" role="tab" aria-selected="true" aria-controls="panelQueue"><svg class="ic"><use href="#i-list"></use></svg>Queue <span class="tab-count" id="queueCount">0</span></button>
+    <button class="tab" id="tabAdd" type="button" role="tab" aria-selected="false" aria-controls="panelAdd"><svg class="ic"><use href="#i-plus"></use></svg>Add videos</button>
+  </nav>
+
+  <div class="panels">
+    <section class="panel on" id="panelQueue" role="tabpanel" aria-labelledby="tabQueue">
+      <div class="filters" id="filters" aria-label="Filter queue">
+        <button class="chip on" type="button" data-filter="all">All <b id="countAll">0</b></button>
+        <button class="chip" type="button" data-filter="pending">Pending <b id="countPending">0</b></button>
+        <button class="chip" type="button" data-filter="done">Watched <b id="countDone">0</b></button>
+        <button class="chip" type="button" data-filter="failed">Failed <b id="countFailed">0</b></button>
+      </div>
+      <div class="bulk" id="bulk">
+        <button class="link-btn" id="retryFailedButton" type="button" title="Move failed items back to pending, up to the active queue limit."><svg class="ic"><use href="#i-retry"></use></svg>Retry failed</button>
+        <button class="link-btn" id="clearCompletedButton" type="button" title="Remove completed items from the queue history."><svg class="ic"><use href="#i-check"></use></svg>Clear finished</button>
+        <span class="spacer"></span>
+        <span class="hint">Newest first</span>
+      </div>
+      <section id="emptyState" class="empty-list" hidden>
+        <span class="ring"><svg class="ic"><use href="#i-spark"></use></svg></span>
+        <b>No queued videos yet.</b>
+        <span>Right-click a YouTube video, or use the three-dot menu, to add one.</span>
       </section>
-
-      <section class="queue-actions" aria-label="Queue actions">
-        <button id="pauseButton" type="button" title="Pause or resume automatic processing. New videos can still be added while paused.">Pause queue</button>
-        <button id="stopButton" type="button" title="Stop the running worker, mark that item as stopped, and pause the queue so the next item does not start. Use Resume queue to continue.">Stop</button>
-        <button id="retryFailedButton" type="button" title="Move failed items back to pending, up to the active queue limit.">Retry failed</button>
-        <button id="clearCompletedButton" type="button" title="Remove completed items from the queue history.">Clear done</button>
-        <button id="clearFailedButton" type="button" title="Remove failed items from the queue history.">Clear failed</button>
+      <section id="filterEmpty" class="empty-list" hidden>
+        <span class="ring"><svg class="ic"><use href="#i-list"></use></svg></span>
+        <b>Nothing in this filter.</b>
+        <span>Choose another filter to see the rest of the queue.</span>
       </section>
+      <ol id="queueList" class="q-list" aria-label="Queued videos"></ol>
+    </section>
 
-      <section class="channel-timeframe" aria-label="Channel timeframe marking">
-        <h2>Channel timeframe</h2>
-        <div class="date-fields">
-          <label class="field">
-            <span class="label-row">
-              <span>Start</span>
-              <span class="info-icon" tabindex="0" role="img" title="Start date. Accepts DD.MM.YYYY or YYYY-MM-DD. Empty means today.">i</span>
-            </span>
-            <div class="date-input-row">
-              <input id="channelStartDate" type="text" inputmode="numeric" placeholder="14.04.2026">
-              <button id="channelTodayButton" type="button" title="Set the start date to today.">Today</button>
-            </div>
-          </label>
-          <label class="field">
-            <span class="label-row">
-              <span>End</span>
-              <span class="info-icon" tabindex="0" role="img" title="End date. Accepts DD.MM.YYYY, YYYY-MM-DD, oldest, or end.">i</span>
-            </span>
-            <div class="date-input-row">
-              <input id="channelEndDate" type="text" inputmode="numeric" placeholder="1.1.2025">
-              <button id="channelOldestButton" type="button" title="Scan through the oldest reachable video on the channel.">End</button>
-            </div>
-          </label>
+    <section class="panel" id="panelAdd" role="tabpanel" aria-labelledby="tabAdd">
+      <div class="ctx"><svg class="ic"><use href="#i-link"></use></svg><span>Works on the YouTube tab you have open right now.</span></div>
+
+      <div class="job-card" id="jobCard" hidden>
+        <div class="job-top">
+          <svg class="ic"><use href="#i-stack"></use></svg><span id="jobName">Playlist</span>
+          <span class="job-x"><button class="job-cancel" id="cancelPlaylistButton" type="button" title="Stop adding the remaining playlist videos."><span id="cancelPlaylistLabel">Cancel</span></button></span>
         </div>
-        <button id="scanChannelButton" type="button" title="Scan the active YouTube™ channel Videos page and queue matching videos.">Scan channel</button>
-        <p id="channelScanStatus" class="settings-note">Open a YouTube™ channel, then scan a date range.</p>
-      </section>
+        <div class="progress"><i id="jobBar" style="width:0%"></i></div>
+        <div class="job-meta"><span id="jobMeta"></span><span>Backlog on</span></div>
+      </div>
 
-      <section class="playlist-mark" aria-label="Playlist marking">
-        <h2>Playlist</h2>
-        <div class="playlist-actions">
-          <button id="markPlaylistButton" type="button" title="Load every video in the open YouTube™ playlist and mark them all as watched. Videos beyond the active queue limit wait in a backlog and enter the queue as earlier ones finish.">Mark playlist as watched</button>
-          <button id="cancelPlaylistButton" type="button" hidden title="Stop adding the remaining playlist videos. Videos already queued are kept.">Cancel</button>
+      <div class="task-card">
+        <div class="task-head"><div class="task-ico"><svg class="ic"><use href="#i-stack"></use></svg></div><div><b>Mark this playlist</b><span>Every video, in playlist order</span></div></div>
+        <p class="task-desc">Loads the whole playlist, including Watch Later. Videos beyond the queue limit wait in a backlog and enter as earlier ones finish.</p>
+        <button class="btn btn-primary btn-block" id="markPlaylistButton" type="button" title="Load every video in the open playlist and mark them all as watched."><svg class="ic"><use href="#i-check"></use></svg>Mark all as watched</button>
+        <p class="scan-status" id="playlistStatus">Open a YouTube™ playlist, then mark every video in it.</p>
+        <div class="task-note"><svg class="ic"><use href="#i-info"></use></svg><span>Keep this tab on the playlist page. You can cancel without losing videos already queued.</span></div>
+      </div>
+
+      <div class="task-card">
+        <div class="task-head"><div class="task-ico alt"><svg class="ic"><use href="#i-calendar"></use></svg></div><div><b>Channel by date</b><span>Queue uploads between two dates</span></div></div>
+        <p class="task-desc">Scans the Videos tab of the channel open in this tab and queues everything published in the range.</p>
+        <div class="field-row">
+          <div class="field"><label for="channelStartDate">From</label><div class="input-line"><input id="channelStartDate" type="text" inputmode="numeric" placeholder="14.04.2026"><button class="mini-btn" id="channelTodayButton" type="button" title="Set the start date to today.">Today</button></div></div>
+          <div class="field"><label for="channelEndDate">To</label><div class="input-line"><input id="channelEndDate" type="text" placeholder="oldest"><button class="mini-btn" id="channelOldestButton" type="button" title="Scan through the oldest reachable video on the channel.">Oldest</button></div></div>
         </div>
-        <p id="playlistStatus" class="settings-note">Open a YouTube™ playlist, then mark every video in it.</p>
-      </section>
+        <button class="btn btn-ghost btn-block" id="scanChannelButton" type="button" title="Scan the active YouTube channel Videos page and queue matching videos."><svg class="ic"><use href="#i-bolt"></use></svg>Scan &amp; queue videos</button>
+        <p class="scan-status" id="channelScanStatus">Accepts 14.04.2026 or 2026-04-14. A reversed range is normalised.</p>
+      </div>
+    </section>
+  </div>
 
-      <section id="settingsPanel" class="settings" aria-label="Worker settings" hidden>
-        <label class="field worker-field">
-          <span class="label-row">
-            <span>Worker</span>
-            <span class="info-icon" tabindex="0" role="img" title="Choose where the temporary YouTube™ playback worker opens. Secondary window is recommended for desktop use.">i</span>
-          </span>
-          <select id="workerMode" aria-describedby="workerModeHelp">
-            <option value="window">Secondary window</option>
-            <option value="tab">Browser tab</option>
-          </select>
-          <span id="workerModeHelp" class="sr-only">Choose where the temporary YouTube™ playback worker opens. Secondary window is recommended for desktop use.</span>
-        </label>
-        <label class="field compact-field">
-          <span class="label-row">
-            <span>Play</span>
-            <span class="info-icon" tabindex="0" role="img" title="How many seconds the video should keep playing after playback starts.">i</span>
-          </span>
-          <input id="playbackSeconds" type="number" min="1" max="30" step="1" aria-describedby="playbackSecondsHelp">
-          <span id="playbackSecondsHelp" class="sr-only">How many seconds the video should keep playing after playback starts.</span>
-        </label>
-        <label class="field compact-field">
-          <span class="label-row">
-            <span>Seek</span>
-            <span class="info-icon" tabindex="0" role="img" title="How far from the end of the video the worker should seek before playing. Videos shorter than this start at 0:00.">i</span>
-          </span>
-          <input id="seekFromEndSeconds" type="number" min="1" max="120" step="1" aria-describedby="seekFromEndSecondsHelp">
-          <span id="seekFromEndSecondsHelp" class="sr-only">How far from the end of the video the worker should seek before playing.</span>
-        </label>
-        <label class="field compact-field">
-          <span class="label-row">
-            <span>Max</span>
-            <span class="info-icon" tabindex="0" role="img" title="Maximum number of pending or running items allowed at once. Completed and failed history does not count.">i</span>
-          </span>
-          <input id="maxQueueSize" type="number" min="1" max="500" step="1" aria-describedby="maxQueueSizeHelp">
-          <span id="maxQueueSizeHelp" class="sr-only">Maximum number of pending or running items allowed at once. Completed and failed history does not count.</span>
-        </label>
-        <p id="windowBounds" class="settings-note"></p>
-        <div class="settings-actions">
-          <button id="resetWindowButton" type="button" title="Forget the saved worker-window position and use the default secondary-monitor placement next time.">Reset window</button>
-          <button id="saveWindowButton" type="button" title="Save the current worker window position and size. Open a worker, move it where you want, then click this before it closes.">Save window</button>
-          <button id="exportDebugButton" type="button" title="Download local queue, settings, and worker timing events as a JSON file.">Export log</button>
+  <footer class="pop-foot">
+    <div class="foot-hint"><svg class="ic"><use href="#i-info"></use></svg><span>Right-click any video &rarr; Mark as watched</span></div>
+    <div class="foot-spacer"></div>
+    <button class="text-danger" id="clearButton" type="button" title="Remove every queue item and stop the active worker if one is running.">Clear all</button>
+  </footer>
+
+  <div class="drawer" id="drawer" aria-hidden="true">
+    <div class="drawer-head">
+      <button class="head-btn" id="drawerBack" type="button" aria-label="Back to queue"><svg class="ic"><use href="#i-chev-l"></use></svg></button>
+      <b>Settings</b>
+      <span class="saved" id="savedChip"><svg class="ic"><use href="#i-check"></use></svg>Saved</span>
+      <div class="head-spacer"></div>
+      <button class="head-btn" id="drawerClose" type="button" aria-label="Close settings"><svg class="ic"><use href="#i-x"></use></svg></button>
+    </div>
+    <div class="drawer-body" id="settingsPanel" aria-label="Worker settings">
+      <div class="group">
+        <p class="group-title">Playback &amp; queue</p>
+        <div class="set-row"><div class="set-copy"><b>Play each video for</b><span>How long the worker keeps playing</span></div><input id="playbackSeconds" type="number" min="1" max="30" step="1"><span class="unit">sec</span></div>
+        <div class="set-row"><div class="set-copy"><b>Start near the end</b><span>Seek back from the last seconds</span></div><input id="seekFromEndSeconds" type="number" min="1" max="120" step="1"><span class="unit">sec</span></div>
+        <div class="set-row"><div class="set-copy"><b>Active queue limit</b><span>Pending + running at one time</span></div><input id="maxQueueSize" type="number" min="1" max="500" step="1"><span class="unit">max</span></div>
+        <div class="set-row"><div class="set-copy"><b>Saved queue limit</b><span id="savedQueueInfo">Total items kept; oldest finished are removed. 0 = keep all</span></div><input id="maxSavedQueueItems" type="number" min="0" max="2000" step="1" title="0 keeps the full history. Pending and running items are never removed."><span class="unit">items</span></div>
+      </div>
+
+      <div class="group">
+        <p class="group-title">Playback window</p>
+        <div class="set-row"><div class="set-copy"><b>Open in</b><span>Secondary window is recommended on desktop</span></div><select id="workerMode"><option value="window">Secondary window</option><option value="tab">Browser tab</option></select></div>
+        <div class="set-row"><div class="set-copy"><b>Window position</b><span id="windowBounds">Worker window: default position</span></div><div class="set-buttons"><button class="mini-btn" id="resetWindowButton" type="button" title="Forget the saved worker-window position.">Reset</button><button class="mini-btn" id="saveWindowButton" type="button" title="Save the current worker window position and size.">Save current</button></div></div>
+      </div>
+
+      <div class="group">
+        <button class="adv-toggle" id="advToggle" type="button" aria-expanded="false"><svg class="ic"><use href="#i-sliders"></use></svg>Advanced<svg class="ic chev"><use href="#i-chev-d"></use></svg></button>
+        <div class="adv-body" id="advBody">
+          <div class="set-row"><div class="set-copy"><b>Playback timeline</b><span>Show worker events on each queue item</span></div><button class="switch" id="debugToggle" type="button" aria-pressed="false" title="Show detailed worker timing and playback events for each queue item." aria-label="Playback timeline"></button></div>
+          <div class="set-row"><div class="set-copy"><b>Export debug log</b><span>Queue, settings and timing as JSON</span></div><button class="mini-btn" id="exportDebugButton" type="button"><svg class="ic" style="width:12px;height:12px;vertical-align:-2px"><use href="#i-download"></use></svg> Export</button></div>
+          <div class="set-row"><div class="set-copy"><b>Failed items</b><span>Remove them from the queue history</span></div><button class="mini-btn" id="clearFailedButton" type="button" title="Remove failed items from the queue history.">Remove failed</button></div>
+          <div class="danger-zone"><b>Clear everything</b><p>Removes the queue and any playlist backlog. This cannot be undone.</p><button class="btn btn-ghost" id="clearAdvanced" type="button">Clear all queue items</button></div>
         </div>
-      </section>
+      </div>
 
-      <ol id="queueList" class="queue" aria-label="Queued videos"></ol>
-    </main>
+      <div class="task-note" style="margin-top:14px"><svg class="ic"><use href="#i-info"></use></svg><span>Changes save automatically. This phase simulates playback; YouTube™ may still not record a video as watched.</span></div>
+    </div>
+  </div>
 
-    <script src="../src/utils/extension.js"></script>
-    <script src="../src/utils/youtube.js"></script>
-    <script src="../src/delay.js"></script>
-    <script src="popup.js"></script>
-  </body>
+  <div class="action-proxies" hidden>
+    <button id="pauseButton" type="button">Pause queue</button>
+    <button id="stopButton" type="button">Stop</button>
+  </div>
+</main>
+
+<script src="../src/utils/extension.js"></script>
+<script src="../src/utils/youtube.js"></script>
+<script src="../src/delay.js"></script>
+<script src="popup.js"></script>
+</body>
 </html>

@@ -11,12 +11,17 @@ const PLAYBACK_SECONDS_KEY = "playbackSeconds";
 const SEEK_FROM_END_SECONDS_KEY = "seekFromEndSeconds";
 const QUEUE_PAUSED_KEY = "queuePaused";
 const MAX_QUEUE_SIZE_KEY = "maxQueueSize";
+const MAX_SAVED_QUEUE_ITEMS_KEY = "maxSavedQueueItems";
 const WAITING_FOR_DIRECT_OPEN_KEY = "waitingForDirectOpen";
 const DEFAULT_PLAYBACK_SECONDS = 5;
 const DEFAULT_SEEK_FROM_END_SECONDS = 30;
 const DEFAULT_QUEUE_PAUSED = false;
 const DEFAULT_MAX_QUEUE_SIZE = 20;
 const MAX_QUEUE_SIZE_LIMIT = 500;
+// Keeps at most 100 saved items by default; 0 restores the old behaviour of
+// keeping the full history.
+const DEFAULT_MAX_SAVED_QUEUE_ITEMS = 100;
+const MAX_SAVED_QUEUE_ITEMS_LIMIT = 2000;
 const WORKER_TIMEOUT_BASE_MS = 35000;
 const WORKER_TIMEOUT_BUFFER_MS = 15000;
 const MAX_DEBUG_EVENTS = 80;
@@ -71,6 +76,9 @@ function cleanTitle(title) {
 }
 
 let queueCache = null;
+// Refreshed by getSettings(). Keeping it local lets setQueue decide about the
+// cap synchronously, so a queue write stays as atomic as it was before.
+let savedQueueLimit = DEFAULT_MAX_SAVED_QUEUE_ITEMS;
 
 async function getQueue() {
   if (queueCache) {
@@ -91,8 +99,16 @@ async function getSettings() {
     SEEK_FROM_END_SECONDS_KEY,
     QUEUE_PAUSED_KEY,
     MAX_QUEUE_SIZE_KEY,
+    MAX_SAVED_QUEUE_ITEMS_KEY,
     WAITING_FOR_DIRECT_OPEN_KEY
   ]);
+
+  savedQueueLimit = normalizeSettingNumber(
+    result[MAX_SAVED_QUEUE_ITEMS_KEY],
+    DEFAULT_MAX_SAVED_QUEUE_ITEMS,
+    0,
+    MAX_SAVED_QUEUE_ITEMS_LIMIT
+  );
 
   return {
     workerMode: result[WORKER_MODE_KEY] || DEFAULT_WORKER_MODE,
@@ -118,6 +134,7 @@ async function getSettings() {
       1,
       MAX_QUEUE_SIZE_LIMIT
     ),
+    maxSavedQueueItems: savedQueueLimit,
     waitingForDirectOpen: typeof result[WAITING_FOR_DIRECT_OPEN_KEY] === "boolean"
       ? result[WAITING_FOR_DIRECT_OPEN_KEY]
       : false
@@ -172,6 +189,15 @@ async function updateSettings(patch) {
     );
   }
 
+  if (Object.prototype.hasOwnProperty.call(patch, "maxSavedQueueItems")) {
+    nextValues[MAX_SAVED_QUEUE_ITEMS_KEY] = normalizeSettingNumber(
+      patch.maxSavedQueueItems,
+      DEFAULT_MAX_SAVED_QUEUE_ITEMS,
+      0,
+      MAX_SAVED_QUEUE_ITEMS_LIMIT
+    );
+  }
+
   if (Object.prototype.hasOwnProperty.call(patch, "waitingForDirectOpen")) {
     nextValues[WAITING_FOR_DIRECT_OPEN_KEY] = Boolean(patch.waitingForDirectOpen);
   }
@@ -187,9 +213,79 @@ async function resetWorkerWindowBounds() {
   await extensionApi.storage.local.remove(WORKER_WINDOW_BOUNDS_KEY);
 }
 
+// Every queue write passes through here, so the saved-history cap cannot be
+// bypassed by an enqueue, a status change or a retry.
 async function setQueue(queue) {
-  queueCache = queue;
-  await extensionApi.storage.local.set({ [STORAGE_KEY]: queue });
+  const nextQueue = trimSavedQueue(queue);
+  queueCache = nextQueue;
+  await extensionApi.storage.local.set({ [STORAGE_KEY]: nextQueue });
+  return nextQueue;
+}
+
+// "Older" means the finished item was last touched longest ago. Pending and
+// running items are never removed: they still have work to do, so the queue may
+// legitimately sit above the cap while a batch is being processed.
+function trimSavedQueue(queue) {
+  const limit = savedQueueLimit;
+
+  if (!limit || queue.length <= limit) {
+    return queue;
+  }
+
+  const liveWorkerId = activeWorker && activeWorker.itemId;
+  const removable = [];
+
+  for (let index = 0; index < queue.length; index += 1) {
+    const item = queue[index];
+
+    if (
+      item.status !== "pending" &&
+      item.status !== "running" &&
+      item.id !== liveWorkerId
+    ) {
+      removable.push({
+        id: item.id,
+        index,
+        at: getQueueItemRecency(item)
+      });
+    }
+  }
+
+  const removeCount = Math.min(removable.length, queue.length - limit);
+
+  if (!removeCount) {
+    return queue;
+  }
+
+  removable.sort((left, right) => left.at - right.at || left.index - right.index);
+  const removedIds = new Set(removable.slice(0, removeCount).map((entry) => entry.id));
+
+  return queue.filter((item) => !removedIds.has(item.id));
+}
+
+function getQueueItemRecency(item) {
+  const parsed = Date.parse(item.completedAt || item.updatedAt || item.createdAt || "");
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+// Applies a newly lowered cap to the queue that is already in storage, and also
+// cleans up an oversized queue left behind by an older version at startup.
+async function enforceSavedQueueLimit() {
+  const queue = await getQueue();
+  const settings = await getSettings();
+
+  if (!settings.maxSavedQueueItems || queue.length <= settings.maxSavedQueueItems) {
+    return false;
+  }
+
+  const nextQueue = await setQueue(queue);
+
+  if (nextQueue.length === queue.length) {
+    return false;
+  }
+
+  await notifyQueueUpdated();
+  return true;
 }
 
 // undefined means "not read yet"; null means "no playlist job".
@@ -259,6 +355,8 @@ async function startPlaylistJob(playlist) {
     title: cleanTitle(playlist.title),
     total: backlog.length,
     videos: backlog,
+    completedCount: 0,
+    failedCount: 0,
     startedAt: new Date().toISOString()
   });
   await feedPlaylistJob();
@@ -342,6 +440,22 @@ function feedPlaylistJob() {
   }
 
   return playlistFeedInFlight;
+}
+
+// Progress lives on the job rather than being derived from the queue, because
+// the saved-history cap removes finished items while a long playlist is running.
+async function recordPlaylistItemOutcome(item, succeeded) {
+  const job = await getPlaylistJob();
+
+  if (!job || !item.playlistId || job.playlistId !== item.playlistId) {
+    return;
+  }
+
+  await setPlaylistJob({
+    ...job,
+    completedCount: (job.completedCount || 0) + (succeeded ? 1 : 0),
+    failedCount: (job.failedCount || 0) + (succeeded ? 0 : 1)
+  });
 }
 
 async function cancelPlaylistJob() {
@@ -689,8 +803,7 @@ async function retryQueueByStatus(status) {
 async function clearQueueByStatus(status) {
   const queue = await getQueue();
   const nextQueue = queue.filter((item) => item.status !== status);
-  await setQueue(nextQueue);
-  return nextQueue;
+  return setQueue(nextQueue);
 }
 
 async function abortActiveWorker(error) {
@@ -1075,6 +1188,13 @@ async function handleRuntimeMessage(message) {
 
   if (message.type === "update-settings") {
     const settings = await updateSettings(message.settings || {});
+
+    // Lowering the cap should take effect immediately, not only on the next
+    // queue write.
+    if (Object.prototype.hasOwnProperty.call(message.settings || {}, "maxSavedQueueItems")) {
+      await enforceSavedQueueLimit();
+    }
+
     await notifyContentQueueState();
 
     if (!settings.queuePaused) {
@@ -1978,6 +2098,7 @@ async function finishQueueItem(item, result, settings) {
     debugSummary: getDebugSummary(result),
     error: result && result.ok ? null : ((result && result.error) || "worker-failed")
   });
+  await recordPlaylistItemOutcome(item, Boolean(result && result.ok));
   await notifyQueueUpdated({ item: completedItem });
 }
 
@@ -1989,6 +2110,7 @@ async function handleQueueItemError(item, error) {
     debugSummary: "Worker window playback failed",
     error: error && error.message ? error.message : String(error)
   });
+  await recordPlaylistItemOutcome(item, false);
   await notifyQueueUpdated({ item: failedItem });
 }
 
@@ -2149,6 +2271,14 @@ async function processQueue() {
   processQueue().catch(console.error);
 }
 
+function startBackgroundWork() {
+  // Load the persisted cap before any queue write can happen.
+  return getSettings()
+    .then(() => resetStaleRunningItems())
+    .then(() => enforceSavedQueueLimit())
+    .then(() => processQueue());
+}
+
 function registerContextMenu() {
   Promise.all(
     MENU_IDS.map((menuId) => (
@@ -2183,12 +2313,12 @@ function registerContextMenu() {
 
 extensionApi.runtime.onInstalled.addListener(() => {
   registerContextMenu();
-  resetStaleRunningItems().then(() => processQueue()).catch(console.error);
+  startBackgroundWork().catch(console.error);
 });
 
 extensionApi.runtime.onStartup.addListener(() => {
   registerContextMenu();
-  resetStaleRunningItems().then(() => processQueue()).catch(console.error);
+  startBackgroundWork().catch(console.error);
 });
 
 extensionApi.contextMenus.onClicked.addListener((info, tab) => {
@@ -2210,6 +2340,4 @@ extensionApi.runtime.onMessage.addListener((message) => {
 });
 
 registerContextMenu();
-resetStaleRunningItems()
-  .then(() => processQueue())
-  .catch(console.error);
+startBackgroundWork().catch(console.error);

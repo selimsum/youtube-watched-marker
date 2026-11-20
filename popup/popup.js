@@ -12,6 +12,8 @@ const workerMode = document.getElementById("workerMode");
 const playbackSeconds = document.getElementById("playbackSeconds");
 const seekFromEndSeconds = document.getElementById("seekFromEndSeconds");
 const maxQueueSize = document.getElementById("maxQueueSize");
+const maxSavedQueueItems = document.getElementById("maxSavedQueueItems");
+const savedQueueInfo = document.getElementById("savedQueueInfo");
 const windowBounds = document.getElementById("windowBounds");
 const channelStartDate = document.getElementById("channelStartDate");
 const channelEndDate = document.getElementById("channelEndDate");
@@ -21,6 +23,7 @@ const scanChannelButton = document.getElementById("scanChannelButton");
 const channelScanStatus = document.getElementById("channelScanStatus");
 const markPlaylistButton = document.getElementById("markPlaylistButton");
 const cancelPlaylistButton = document.getElementById("cancelPlaylistButton");
+const cancelPlaylistLabel = document.getElementById("cancelPlaylistLabel");
 const playlistStatus = document.getElementById("playlistStatus");
 const pauseButton = document.getElementById("pauseButton");
 const resetWindowButton = document.getElementById("resetWindowButton");
@@ -30,11 +33,72 @@ const retryFailedButton = document.getElementById("retryFailedButton");
 const clearCompletedButton = document.getElementById("clearCompletedButton");
 const clearFailedButton = document.getElementById("clearFailedButton");
 const exportDebugButton = document.getElementById("exportDebugButton");
+const hero = document.getElementById("hero");
+const heroEyebrow = document.getElementById("heroEyebrow");
+const heroTitle = document.getElementById("heroTitle");
+const heroCount = document.getElementById("heroCount");
+const heroBar = document.getElementById("heroBar");
+const heroProgress = document.getElementById("heroProgress");
+const heroNow = document.getElementById("heroNow");
+const heroNowText = document.getElementById("heroNowText");
+const heroNowExtra = document.getElementById("heroNowExtra");
+const heroTip = document.getElementById("heroTip");
+const heroPrimary = document.getElementById("heroPrimary");
+const heroSecondary = document.getElementById("heroSecondary");
+const heroFailView = document.getElementById("heroFailView");
+const miniEyebrow = document.getElementById("miniEyebrow");
+const miniDetail = document.getElementById("miniDetail");
+const miniAction = document.getElementById("miniAction");
+const tabQueue = document.getElementById("tabQueue");
+const tabAdd = document.getElementById("tabAdd");
+const panelQueue = document.getElementById("panelQueue");
+const panelAdd = document.getElementById("panelAdd");
+const filters = document.getElementById("filters");
+const filterEmpty = document.getElementById("filterEmpty");
+const countAll = document.getElementById("countAll");
+const countPending = document.getElementById("countPending");
+const countDone = document.getElementById("countDone");
+const countFailed = document.getElementById("countFailed");
+const queueCount = document.getElementById("queueCount");
+const jobCard = document.getElementById("jobCard");
+const jobName = document.getElementById("jobName");
+const jobBar = document.getElementById("jobBar");
+const jobMeta = document.getElementById("jobMeta");
+const drawer = document.getElementById("drawer");
+const drawerBack = document.getElementById("drawerBack");
+const drawerClose = document.getElementById("drawerClose");
+const savedChip = document.getElementById("savedChip");
+const advToggle = document.getElementById("advToggle");
+const advBody = document.getElementById("advBody");
+const clearAdvanced = document.getElementById("clearAdvanced");
 let debugVisible = false;
 let currentSettings = {};
 let currentQueue = [];
 let currentPlaylistJob = null;
 let playlistScanning = false;
+let currentFilter = "all";
+let currentTab = "queue";
+let savedTimer = 0;
+
+const THUMB_COLORS = ["#6b7fb3", "#b07a68", "#5d8f83", "#8a7ba8", "#a88a55", "#4f7fa8", "#9a6b7c", "#5f7a6b"];
+const STATUS_LABELS = { pending: "Queued", running: "Playing", completed: "Watched", failed: "Failed" };
+const STATUS_ICONS = { pending: "i-clock", running: "i-play", completed: "i-check", failed: "i-alert" };
+
+function thumbColor(videoId) {
+  let hash = 0;
+  for (const character of String(videoId || "")) {
+    hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+  }
+  return THUMB_COLORS[hash % THUMB_COLORS.length];
+}
+
+function sourceLabel(item) {
+  const source = String(item.source || "");
+  if (item.playlistId) return "from playlist";
+  if (source === "channel-timeframe") return "channel scan";
+  if (source === "context-menu" || source === "link") return "context menu";
+  return item.sourceUrl ? "from YouTube" : "added manually";
+}
 
 function formatDate(value) {
   const date = new Date(value);
@@ -281,6 +345,21 @@ function setPlaylistStatus(text) {
   playlistStatus.textContent = text;
 }
 
+// Finished playlist items can be trimmed from the queue while the job is still
+// running, so the job's own counters are the source of truth. Older jobs saved
+// before those counters existed fall back to counting queue items.
+function getPlaylistDoneCount(job, queued) {
+  if (Number.isFinite(job.completedCount) && Number.isFinite(job.failedCount)) {
+    // A retried item is counted twice, so never report more done than queued.
+    return Math.min(queued, job.completedCount + job.failedCount);
+  }
+
+  return currentQueue.filter((item) => (
+    item.playlistId === job.playlistId &&
+    (item.status === "completed" || item.status === "failed")
+  )).length;
+}
+
 const PLAYLIST_SCAN_ERRORS = {
   "not-playlist-page": "This tab is not a YouTube™ playlist page.",
   "playlist-not-ready": "The playlist page did not finish opening. Try again.",
@@ -397,80 +476,93 @@ function renderPlaylistProgress() {
   }
 
   const remaining = job.videos.length;
-  const done = currentQueue.filter((item) => (
-    item.playlistId === job.playlistId &&
-    (item.status === "completed" || item.status === "failed")
-  )).length;
+  const queued = Math.max(0, (job.total || 0) - remaining);
+  const done = getPlaylistDoneCount(job, queued);
   const name = job.title || job.playlistId;
 
   cancelPlaylistButton.hidden = false;
-  cancelPlaylistButton.textContent = remaining ? "Cancel" : "Dismiss";
+  cancelPlaylistLabel.textContent = remaining ? "Cancel" : "Dismiss";
   setPlaylistStatus(remaining
     ? `${name}: ${job.total - remaining}/${job.total} queued, ${done} done`
     : `${name}: all ${job.total} queued, ${done} done`);
 }
 
+function iconSvg(name) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "ic");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", `#${name}`);
+  svg.appendChild(use);
+  return svg;
+}
+
 function createQueueNode(item) {
   const node = document.createElement("li");
-  node.className = `queue-item queue-item-${item.status}`;
+  node.className = `queue-item queue-item-${item.status} qi`;
+  node.dataset.status = item.status;
+  node.title = `${item.title || item.videoId} - ${item.videoId}`;
 
-  const topRow = document.createElement("div");
-  topRow.className = "queue-row";
+  const thumbnailIcon = item.status === "completed" ? "i-check" : item.status === "failed" ? "i-alert" : "i-play";
+  const thumb = document.createElement("div");
+  thumb.className = "qi-thumb";
+  thumb.style.setProperty("--th", thumbColor(item.videoId));
+  thumb.append(iconSvg(thumbnailIcon));
 
-  const videoId = document.createElement("span");
-  videoId.className = "video-id";
-  videoId.textContent = item.videoId;
+  const main = document.createElement("div");
+  main.className = "qi-main";
 
   const title = document.createElement("div");
-  title.className = "video-title";
+  title.className = "qi-title";
   title.textContent = item.title || item.videoId;
-  title.title = item.title || item.videoId;
 
-  const status = document.createElement("span");
-  status.className = "status";
-  status.textContent = item.status;
+  const meta = document.createElement("div");
+  meta.className = "qi-meta";
+  meta.textContent = getItemDetailText(item);
 
-  const source = document.createElement("div");
-  source.className = "source";
-  source.title = item.sourceUrl;
-  source.textContent = item.sourceUrl;
+  const tags = document.createElement("div");
+  tags.className = "qi-tags";
 
-  const created = document.createElement("div");
-  created.className = "created";
-  created.textContent = getItemDetailText(item);
+  const pill = document.createElement("span");
+  pill.className = `pill pill-${item.status}`;
+  pill.append(iconSvg(STATUS_ICONS[item.status] || "i-clock"));
+  pill.append(document.createTextNode(STATUS_LABELS[item.status] || item.status));
+
+  const source = document.createElement("span");
+  source.className = "qi-src";
+  source.textContent = sourceLabel(item);
+  tags.append(pill, source);
+  main.append(title, meta, tags);
 
   const actions = document.createElement("div");
-  actions.className = "item-actions";
-
+  actions.className = "qi-actions";
   if (item.status === "failed" || item.status === "completed") {
-    actions.append(createActionButton("Retry", () => retryItem(item.id)));
+    actions.append(createIconAction("i-retry", "Retry", () => retryItem(item.id)));
   }
-
-  actions.append(createActionButton("Remove", () => removeItem(item.id)));
+  const removeButton = createIconAction("i-trash", "Remove", () => removeItem(item.id));
+  removeButton.classList.add("danger");
+  actions.append(removeButton);
 
   const debug = document.createElement("div");
   debug.className = "debug";
-
   if (item.debugSummary) {
     const debugSummaryNode = document.createElement("div");
     debugSummaryNode.className = "debug-summary";
     debugSummaryNode.textContent = item.debugSummary;
     debug.append(debugSummaryNode);
   }
-
   debug.append(createDebugTimelineNode(item));
 
-  topRow.append(title, status);
-  node.append(topRow, videoId, source, created, actions, debug);
-
+  node.append(thumb, main, actions, debug);
   return node;
 }
 
-function createActionButton(label, onClick) {
+function createIconAction(iconName, label, onClick) {
   const button = document.createElement("button");
-  button.className = "item-action";
+  button.className = "icon-btn";
   button.type = "button";
-  button.textContent = label;
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  button.append(iconSvg(iconName));
   button.addEventListener("click", () => {
     onClick().catch(console.error);
   });
@@ -543,6 +635,191 @@ function itemSignature(item) {
   ].join("|");
 }
 
+function getQueueCounts(queue) {
+  const counts = { pending: 0, running: 0, completed: 0, failed: 0 };
+  queue.forEach((item) => {
+    if (Object.prototype.hasOwnProperty.call(counts, item.status)) {
+      counts[item.status] += 1;
+    }
+  });
+  return counts;
+}
+
+function renderFilterCounts(queue) {
+  const counts = getQueueCounts(queue);
+  countAll.textContent = String(queue.length);
+  countPending.textContent = String(counts.pending + counts.running);
+  countDone.textContent = String(counts.completed);
+  countFailed.textContent = String(counts.failed);
+  queueCount.textContent = String(queue.length);
+}
+
+function applyFilter() {
+  let visible = 0;
+  for (const entry of queueNodes.values()) {
+    const status = entry.node.dataset.status;
+    const show = currentFilter === "all" ||
+      (currentFilter === "pending" && (status === "pending" || status === "running")) ||
+      status === currentFilter;
+    entry.node.hidden = !show;
+    if (show) visible += 1;
+  }
+  filterEmpty.hidden = !(currentQueue.length > 0 && visible === 0);
+}
+
+function setFilter(filter) {
+  currentFilter = filter;
+  Array.from(filters.querySelectorAll("[data-filter]")).forEach((button) => {
+    button.classList.toggle("on", button.dataset.filter === filter);
+  });
+  applyFilter();
+}
+
+function setTab(tab) {
+  currentTab = tab;
+  tabQueue.classList.toggle("on", tab === "queue");
+  tabAdd.classList.toggle("on", tab === "add");
+  tabQueue.setAttribute("aria-selected", String(tab === "queue"));
+  tabAdd.setAttribute("aria-selected", String(tab === "add"));
+  panelQueue.hidden = tab !== "queue";
+  panelAdd.hidden = tab !== "add";
+  hero.classList.toggle("compact", tab === "add");
+}
+
+function openDrawer(open) {
+  drawer.classList.toggle("open", open);
+  drawer.setAttribute("aria-hidden", String(!open));
+  optionsToggle.setAttribute("aria-expanded", String(open));
+}
+
+function savedFlash() {
+  savedChip.classList.add("on");
+  clearTimeout(savedTimer);
+  savedTimer = setTimeout(function () {
+    savedChip.classList.remove("on");
+  }, 1500);
+}
+
+function renderJobCard(job) {
+  if (!job || !Array.isArray(job.videos) || !job.videos.length) {
+    jobCard.hidden = true;
+    return;
+  }
+  jobCard.hidden = false;
+  jobName.textContent = job.title || "Playlist";
+  const queued = Math.max(0, (job.total || 0) - job.videos.length);
+  const done = getPlaylistDoneCount(job, queued);
+  jobMeta.textContent = `${queued}/${job.total} queued - ${done} done`;
+  jobBar.style.width = `${job.total ? Math.round(queued / job.total * 100) : 0}%`;
+}
+
+function renderHero(queue, job) {
+  const counts = getQueueCounts(queue);
+  const total = queue.length;
+  const active = counts.pending + counts.running;
+  const paused = Boolean(currentSettings.queuePaused);
+  const percentage = total ? Math.round((counts.completed / total) * 100) : 0;
+  let state;
+
+  if (!total) {
+    state = {
+      tone: "idle", eyebrow: "All clear", title: "Nothing in the queue",
+      detail: "Everything you marked is up to date", progress: 0,
+      now: "", extra: "", primary: "Add videos", action: "add",
+      secondary: false, failView: false, mini: "Add"
+    };
+  } else if (paused) {
+    state = {
+      tone: "paused", eyebrow: "Paused", title: "Queue is on hold",
+      detail: `${active} video${active === 1 ? "" : "s"} waiting to be marked`,
+      progress: percentage, now: "Nothing will start until you resume", extra: "",
+      primary: "Resume queue", action: "resume", secondary: true,
+      failView: false, mini: "Resume"
+    };
+  } else if (counts.running) {
+    const runningItem = queue.find((item) => item.status === "running");
+    state = {
+      tone: "run", eyebrow: "Working", title: "Marking your videos",
+      detail: `${counts.completed} of ${total} watched - ${active} still to go`,
+      progress: percentage,
+      now: runningItem ? (runningItem.title || runningItem.videoId) : "Playing in worker window",
+      extra: runningItem && runningItem.workerStatus ? runningItem.workerStatus : "5s play",
+      primary: "Pause queue", action: "pause", secondary: true,
+      failView: false, mini: "Pause"
+    };
+  } else if (counts.failed && !active) {
+    state = {
+      tone: "fail", eyebrow: "Needs attention",
+      title: `${counts.failed} video${counts.failed === 1 ? "" : "s"} could not play`,
+      detail: "Playback did not start in the worker window", progress: percentage,
+      now: "Retry them, or remove them from the queue", extra: "",
+      primary: "Retry all", action: "retry", secondary: false,
+      failView: true, mini: "Retry"
+    };
+  } else if (active) {
+    const backlog = job && Array.isArray(job.videos) && job.videos.length;
+    state = {
+      tone: backlog ? "run" : "idle",
+      eyebrow: backlog ? "Playlist backlog" : "Ready",
+      title: backlog ? (job.title || "Playlist") : `${active} video${active === 1 ? "" : "s"} waiting`,
+      detail: backlog
+        ? `${(job.total || 0) - job.videos.length}/${job.total} queued - ${counts.completed} done`
+        : "The queue will start automatically",
+      progress: percentage,
+      now: backlog ? "Remaining videos enter as earlier ones finish" : "",
+      extra: "",
+      primary: "Pause queue", action: "pause", secondary: true,
+      failView: false, mini: "Pause"
+    };
+  } else {
+    state = {
+      tone: "idle", eyebrow: "All clear", title: "All caught up",
+      detail: `${counts.completed} watched - nothing left to do`, progress: 100,
+      now: "", extra: "", primary: "Add videos", action: "add",
+      secondary: false, failView: false, mini: "Add"
+    };
+  }
+
+  hero.dataset.tone = state.tone;
+  heroEyebrow.textContent = state.eyebrow;
+  miniEyebrow.textContent = state.eyebrow;
+  heroTitle.textContent = state.title;
+  summary.textContent = state.detail;
+  miniDetail.textContent = state.detail;
+  heroCount.textContent = total ? `${state.progress}%` : "";
+  heroBar.style.width = `${state.progress}%`;
+  heroProgress.hidden = !total;
+  heroTip.hidden = total !== 0;
+  heroNow.hidden = !state.now;
+  heroNowText.textContent = state.now;
+  heroNowExtra.textContent = state.extra;
+  heroPrimary.textContent = state.primary;
+  heroPrimary.dataset.action = state.action;
+  miniAction.textContent = state.mini;
+  miniAction.dataset.action = state.action;
+  heroSecondary.hidden = !state.secondary;
+  heroFailView.hidden = !state.failView;
+}
+
+function handleHeroAction(action) {
+  if (action === "pause" || action === "resume") {
+    pauseButton.click();
+  } else if (action === "retry") {
+    retryFailedButton.click();
+  } else if (action === "add") {
+    setTab("add");
+  }
+}
+
+function renderSavedQueueInfo() {
+  const limit = Number.isFinite(currentSettings.maxSavedQueueItems)
+    ? currentSettings.maxSavedQueueItems
+    : 100;
+  savedQueueInfo.textContent = limit
+    ? `Cap ${limit}: oldest finished removed, active kept (${currentQueue.length} saved). 0 = off.`
+    : `Oldest finished are removed above the cap. 0 = keep all (${currentQueue.length} saved).`;
+}
+
 function renderQueue(queue, playlistJob = currentPlaylistJob) {
   currentQueue = queue;
   currentPlaylistJob = playlistJob;
@@ -582,7 +859,12 @@ function renderQueue(queue, playlistJob = currentPlaylistJob) {
     }
   }
 
-  summary.textContent = getQueueSummary(queue);
+  renderFilterCounts(queue);
+  applyFilter();
+  renderBulkState(queue);
+  renderJobCard(playlistJob);
+  renderHero(queue, playlistJob);
+  renderSavedQueueInfo();
   emptyState.hidden = queue.length !== 0;
   clearButton.disabled = queue.length === 0;
 
@@ -593,21 +875,10 @@ function renderQueue(queue, playlistJob = currentPlaylistJob) {
   renderPlaylistProgress();
 }
 
-function getQueueSummary(queue) {
-  const counts = queue.reduce((accumulator, item) => {
-    accumulator[item.status] = (accumulator[item.status] || 0) + 1;
-    return accumulator;
-  }, {});
-
-  const parts = [
-    counts.running ? `${counts.running} running` : null,
-    counts.pending ? `${counts.pending} pending` : null,
-    counts.completed ? `${counts.completed} completed` : null,
-    counts.failed ? `${counts.failed} failed` : null
-  ].filter(Boolean);
-
-  const text = parts.length ? parts.join(" / ") : "No queued videos";
-  return currentSettings.queuePaused ? `Paused / ${text}` : text;
+function renderBulkState(queue) {
+  const counts = getQueueCounts(queue);
+  retryFailedButton.disabled = counts.failed === 0;
+  clearCompletedButton.disabled = counts.completed === 0;
 }
 
 async function loadQueue() {
@@ -631,6 +902,9 @@ function applySettings(settings) {
   playbackSeconds.value = settings.playbackSeconds || 5;
   seekFromEndSeconds.value = settings.seekFromEndSeconds || 30;
   maxQueueSize.value = settings.maxQueueSize || 20;
+  maxSavedQueueItems.value = Number.isFinite(settings.maxSavedQueueItems)
+    ? settings.maxSavedQueueItems
+    : 100;
   pauseButton.textContent = settings.queuePaused ? "Resume queue" : "Pause queue";
   windowBounds.textContent = formatWindowBounds(settings.workerWindowBounds);
   renderQueue(currentQueue);
@@ -722,13 +996,15 @@ let clearArmTimer = 0;
 function disarmClear() {
   clearArmed = false;
   clearTimeout(clearArmTimer);
-  clearButton.textContent = "Clear";
+  clearButton.textContent = "Clear all";
+  clearButton.classList.remove("armed");
 }
 
 clearButton.addEventListener("click", () => {
   if (!clearArmed) {
     clearArmed = true;
     clearButton.textContent = "Confirm clear";
+    clearButton.classList.add("armed");
     clearTimeout(clearArmTimer);
     clearArmTimer = setTimeout(disarmClear, 3000);
     return;
@@ -739,9 +1015,38 @@ clearButton.addEventListener("click", () => {
 });
 
 optionsToggle.addEventListener("click", () => {
-  const expanded = optionsToggle.getAttribute("aria-expanded") === "true";
-  optionsToggle.setAttribute("aria-expanded", String(!expanded));
-  settingsPanel.hidden = expanded;
+  openDrawer(!drawer.classList.contains("open"));
+});
+drawerBack.addEventListener("click", () => openDrawer(false));
+drawerClose.addEventListener("click", () => openDrawer(false));
+
+advToggle.addEventListener("click", () => {
+  const expanded = advToggle.getAttribute("aria-expanded") === "true";
+  advToggle.setAttribute("aria-expanded", String(!expanded));
+  advBody.classList.toggle("on", !expanded);
+});
+
+clearAdvanced.addEventListener("click", () => {
+  openDrawer(false);
+  clearButton.click();
+});
+
+settingsPanel.addEventListener("change", savedFlash);
+
+tabQueue.addEventListener("click", () => setTab("queue"));
+tabAdd.addEventListener("click", () => setTab("add"));
+Array.from(filters.querySelectorAll("[data-filter]")).forEach((button) => {
+  button.addEventListener("click", () => setFilter(button.dataset.filter));
+});
+heroPrimary.addEventListener("click", () => handleHeroAction(heroPrimary.dataset.action));
+heroSecondary.addEventListener("click", () => stopButton.click());
+heroFailView.addEventListener("click", () => setFilter("failed"));
+miniAction.addEventListener("click", () => handleHeroAction(miniAction.dataset.action));
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  if (drawer.classList.contains("open")) openDrawer(false);
+  else if (clearArmed) disarmClear();
 });
 
 debugToggle.addEventListener("click", () => {
@@ -774,6 +1079,12 @@ maxQueueSize.addEventListener("change", async () => {
   });
 });
 
+maxSavedQueueItems.addEventListener("change", async () => {
+  await updateSettings({
+    maxSavedQueueItems: maxSavedQueueItems.value
+  });
+  await loadQueue();
+});
 
 pauseButton.addEventListener("click", async () => {
   await updateSettings({
