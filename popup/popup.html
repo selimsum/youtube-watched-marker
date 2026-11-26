@@ -66,7 +66,7 @@
       <div class="filters" id="filters" aria-label="Filter queue">
         <button class="chip on" type="button" data-filter="all">All <b id="countAll">0</b></button>
         <button class="chip" type="button" data-filter="pending">Pending <b id="countPending">0</b></button>
-        <button class="chip" type="button" data-filter="done">Watched <b id="countDone">0</b></button>
+        <button class="chip" type="button" data-filter="completed">Watched <b id="countDone">0</b></button>
         <button class="chip" type="button" data-filter="failed">Failed <b id="countFailed">0</b></button>
       </div>
       <div class="bulk" id="bulk">
@@ -88,7 +88,7 @@
       <ol id="queueList" class="q-list" aria-label="Queued videos"></ol>
     </section>
 
-    <section class="panel" id="panelAdd" role="tabpanel" aria-labelledby="tabAdd">
+    <section class="panel" id="panelAdd" role="tabpanel" aria-labelledby="tabAdd" hidden>
       <div class="ctx"><svg class="ic"><use href="#i-link"></use></svg><span>Works on the YouTube tab you have open right now.</span></div>
 
       <div class="job-card" id="jobCard" hidden>
@@ -162,11 +162,6 @@
 
       <div class="task-note" style="margin-top:14px"><svg class="ic"><use href="#i-info"></use></svg><span>Changes save automatically. This phase simulates playback; YouTube™ may still not record a video as watched.</span></div>
     </div>
-  </div>
-
-  <div class="action-proxies" hidden>
-    <button id="pauseButton" type="button">Pause queue</button>
-    <button id="stopButton" type="button">Stop</button>
   </div>
 </main>
 

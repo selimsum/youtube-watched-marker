@@ -52,7 +52,7 @@
     var sheetStyle = document.createElement("style");
     sheetStyle.id = "ytwm-sheet-style";
     sheetStyle.textContent =
-      "tp-yt-iron-dropdown{min-width:" + SHEET_MIN_WIDTH + "px!important;width:auto!important}" +
+      "ytd-popup-container tp-yt-iron-dropdown{min-width:" + SHEET_MIN_WIDTH + "px!important;width:auto!important}" +
       "yt-sheet-view-model{min-width:" + SHEET_MIN_WIDTH + "px!important;width:auto!important}" +
       "yt-contextual-sheet-layout{min-width:" + SHEET_MIN_WIDTH + "px!important;width:auto!important}" +
       "yt-contextual-sheet-layout yt-list-view-model{min-width:" + (SHEET_MIN_WIDTH - 10) + "px!important}" +
@@ -94,12 +94,13 @@
             if (trailing.indexOf("check") !== -1 || trailing.indexOf("select") !== -1) return true;
           } catch (e) {}
         }
-        try {
-          var cmdText = JSON.stringify(
-            (vm.rendererContext && vm.rendererContext.commandContext) || vm.onTap || entry.onTap || ""
-          ).toLowerCase();
-          if (cmdText.indexOf("sort") !== -1 || cmdText.indexOf("filter") !== -1) return true;
-        } catch (e2) {}
+        var cmdObj = (vm.rendererContext && vm.rendererContext.commandContext) || vm.onTap || entry.onTap;
+        if (cmdObj) {
+          try {
+            var cmdText = JSON.stringify(cmdObj).toLowerCase();
+            if (cmdText.indexOf("sort") !== -1 || cmdText.indexOf("filter") !== -1) return true;
+          } catch (e2) {}
+        }
       }
       return false;
     }
@@ -287,18 +288,25 @@
       }
     }
 
+    var MENU_ENDPOINT_REGEX = /\/youtubei\/v1\/(?:browse|next|search|reel|playlist|guide|get_watch|account|history)\b/;
+
+    function isMenuBearingEndpoint(url) {
+      return Boolean(url && MENU_ENDPOINT_REGEX.test(url));
+    }
+
     function modify(js) {
       debugLog("ytwm: modify called", js && typeof js, Array.isArray(js));
       injectInto(js, new WeakSet(), false, false);
     }
-    // Inject into ytInitialData right now if it already exists
-    if (window.ytInitialData) {
+    // Preserve any existing ytInitialData before defining the setter so we
+    // don't wipe an already-populated page state.
+    var _origData = window.ytInitialData;
+    if (_origData && typeof _origData === "object") {
       debugLog("ytwm: ytInitialData already set, injecting now");
-      try { modify(window.ytInitialData); } catch(e) { debugError("ytwm: error", e); }
+      try { modify(_origData); } catch(e) { debugError("ytwm: error", e); }
     }
 
     // Intercept ytInitialData being set on window
-    var _origData = void 0;
     Object.defineProperty(window, "ytInitialData", {
       configurable: true,
       enumerable: true,
@@ -313,13 +321,16 @@
     var _fetch = window.fetch.bind(window);
     window.fetch = function(u, i) {
       var url = (typeof u === "string" ? u : (u && u.url)) || "";
-      if (url.indexOf("/youtubei/v1/") === -1) return _fetch(u, i);
+      if (!isMenuBearingEndpoint(url)) return _fetch(u, i);
       return _fetch(u, i).then(function(r) {
         if (!r.ok) return r;
         var cl = r.clone();
         return cl.json().then(function(j) {
           try { modify(j); } catch(e) {}
-          return new Response(JSON.stringify(j), { status: r.status, statusText: r.statusText, headers: r.headers });
+          var headers = new Headers(r.headers);
+          headers.delete("content-length");
+          headers.delete("content-encoding");
+          return new Response(JSON.stringify(j), { status: r.status, statusText: r.statusText, headers: headers });
         }).catch(function() { return r; });
       });
     };
@@ -332,7 +343,7 @@
     };
     var _send = XMLHttpRequest.prototype.send;
     XMLHttpRequest.prototype.send = function(b) {
-      if (this._ytwmUrl && this._ytwmUrl.indexOf("/youtubei/v1/") !== -1) {
+      if (isMenuBearingEndpoint(this._ytwmUrl)) {
         var self = this;
         self.addEventListener("readystatechange", function() {
           if (self.readyState !== 4) return;

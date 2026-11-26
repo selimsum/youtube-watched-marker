@@ -25,10 +25,8 @@ const markPlaylistButton = document.getElementById("markPlaylistButton");
 const cancelPlaylistButton = document.getElementById("cancelPlaylistButton");
 const cancelPlaylistLabel = document.getElementById("cancelPlaylistLabel");
 const playlistStatus = document.getElementById("playlistStatus");
-const pauseButton = document.getElementById("pauseButton");
 const resetWindowButton = document.getElementById("resetWindowButton");
 const saveWindowButton = document.getElementById("saveWindowButton");
-const stopButton = document.getElementById("stopButton");
 const retryFailedButton = document.getElementById("retryFailedButton");
 const clearCompletedButton = document.getElementById("clearCompletedButton");
 const clearFailedButton = document.getElementById("clearFailedButton");
@@ -660,6 +658,7 @@ function applyFilter() {
     const status = entry.node.dataset.status;
     const show = currentFilter === "all" ||
       (currentFilter === "pending" && (status === "pending" || status === "running")) ||
+      ((currentFilter === "completed" || currentFilter === "done") && status === "completed") ||
       status === currentFilter;
     entry.node.hidden = !show;
     if (show) visible += 1;
@@ -738,12 +737,13 @@ function renderHero(queue, job) {
     };
   } else if (counts.running) {
     const runningItem = queue.find((item) => item.status === "running");
+    const defaultDuration = `${currentSettings.playbackSeconds || 5}s play`;
     state = {
       tone: "run", eyebrow: "Working", title: "Marking your videos",
       detail: `${counts.completed} of ${total} watched - ${active} still to go`,
       progress: percentage,
       now: runningItem ? (runningItem.title || runningItem.videoId) : "Playing in worker window",
-      extra: runningItem && runningItem.workerStatus ? runningItem.workerStatus : "5s play",
+      extra: runningItem && runningItem.workerStatus ? runningItem.workerStatus : defaultDuration,
       primary: "Pause queue", action: "pause", secondary: true,
       failView: false, mini: "Pause"
     };
@@ -758,14 +758,16 @@ function renderHero(queue, job) {
     };
   } else if (active) {
     const backlog = job && Array.isArray(job.videos) && job.videos.length;
+    const queued = backlog ? Math.max(0, (job.total || 0) - job.videos.length) : 0;
+    const done = backlog ? getPlaylistDoneCount(job, queued) : 0;
     state = {
       tone: backlog ? "run" : "idle",
       eyebrow: backlog ? "Playlist backlog" : "Ready",
       title: backlog ? (job.title || "Playlist") : `${active} video${active === 1 ? "" : "s"} waiting`,
       detail: backlog
-        ? `${(job.total || 0) - job.videos.length}/${job.total} queued - ${counts.completed} done`
+        ? `${queued}/${job.total} queued - ${done} done`
         : "The queue will start automatically",
-      progress: percentage,
+      progress: backlog && job.total ? Math.round((done / job.total) * 100) : percentage,
       now: backlog ? "Remaining videos enter as earlier ones finish" : "",
       extra: "",
       primary: "Pause queue", action: "pause", secondary: true,
@@ -803,9 +805,9 @@ function renderHero(queue, job) {
 
 function handleHeroAction(action) {
   if (action === "pause" || action === "resume") {
-    pauseButton.click();
+    toggleQueuePause().catch(console.error);
   } else if (action === "retry") {
-    retryFailedButton.click();
+    sendQueueAction("retry-failed").catch(console.error);
   } else if (action === "add") {
     setTab("add");
   }
@@ -826,10 +828,11 @@ function renderQueue(queue, playlistJob = currentPlaylistJob) {
   document.body.classList.toggle("debug-visible", debugVisible);
 
   // Rebuild only rows whose content changed, so scroll position and focus
-  // survive the per-second worker status updates.
+  // survive the per-second worker status updates. Display newest items first.
+  const displayQueue = [...queue].reverse();
   const visibleIds = new Set();
 
-  queue.forEach((item, index) => {
+  displayQueue.forEach((item, index) => {
     visibleIds.add(item.id);
 
     const entry = queueNodes.get(item.id);
@@ -865,8 +868,10 @@ function renderQueue(queue, playlistJob = currentPlaylistJob) {
   renderJobCard(playlistJob);
   renderHero(queue, playlistJob);
   renderSavedQueueInfo();
+  const hasActiveBacklog = Boolean(playlistJob && Array.isArray(playlistJob.videos) && playlistJob.videos.length);
   emptyState.hidden = queue.length !== 0;
-  clearButton.disabled = queue.length === 0;
+  clearButton.disabled = queue.length === 0 && !hasActiveBacklog;
+  clearAdvanced.disabled = clearButton.disabled;
 
   if (clearButton.disabled) {
     disarmClear();
@@ -905,7 +910,6 @@ function applySettings(settings) {
   maxSavedQueueItems.value = Number.isFinite(settings.maxSavedQueueItems)
     ? settings.maxSavedQueueItems
     : 100;
-  pauseButton.textContent = settings.queuePaused ? "Resume queue" : "Pause queue";
   windowBounds.textContent = formatWindowBounds(settings.workerWindowBounds);
   renderQueue(currentQueue);
 }
@@ -925,13 +929,27 @@ function formatWindowBounds(bounds) {
   return parts.length ? `Worker window: ${parts.join(", ")}` : "Worker window: default position";
 }
 
-async function updateSettings(patch) {
+async function updateSettings(patch, showSaved = false) {
   const response = await extensionApi.runtime.sendMessage({
     type: "update-settings",
     settings: patch
   });
 
   applySettings(response.settings || {});
+  if (showSaved) {
+    savedFlash();
+  }
+}
+
+async function toggleQueuePause() {
+  await updateSettings({
+    queuePaused: !currentSettings.queuePaused
+  });
+  await loadQueue();
+}
+
+function stopWorker() {
+  return sendQueueAction("stop-worker");
 }
 
 async function clearQueue() {
@@ -1031,15 +1049,13 @@ clearAdvanced.addEventListener("click", () => {
   clearButton.click();
 });
 
-settingsPanel.addEventListener("change", savedFlash);
-
 tabQueue.addEventListener("click", () => setTab("queue"));
 tabAdd.addEventListener("click", () => setTab("add"));
 Array.from(filters.querySelectorAll("[data-filter]")).forEach((button) => {
   button.addEventListener("click", () => setFilter(button.dataset.filter));
 });
 heroPrimary.addEventListener("click", () => handleHeroAction(heroPrimary.dataset.action));
-heroSecondary.addEventListener("click", () => stopButton.click());
+heroSecondary.addEventListener("click", () => stopWorker().catch(console.error));
 heroFailView.addEventListener("click", () => setFilter("failed"));
 miniAction.addEventListener("click", () => handleHeroAction(miniAction.dataset.action));
 
@@ -1058,38 +1074,31 @@ debugToggle.addEventListener("click", () => {
 workerMode.addEventListener("change", async () => {
   await updateSettings({
     workerMode: workerMode.value
-  });
+  }, true);
 });
 
 playbackSeconds.addEventListener("change", async () => {
   await updateSettings({
     playbackSeconds: playbackSeconds.value
-  });
+  }, true);
 });
 
 seekFromEndSeconds.addEventListener("change", async () => {
   await updateSettings({
     seekFromEndSeconds: seekFromEndSeconds.value
-  });
+  }, true);
 });
 
 maxQueueSize.addEventListener("change", async () => {
   await updateSettings({
     maxQueueSize: maxQueueSize.value
-  });
+  }, true);
 });
 
 maxSavedQueueItems.addEventListener("change", async () => {
   await updateSettings({
     maxSavedQueueItems: maxSavedQueueItems.value
-  });
-  await loadQueue();
-});
-
-pauseButton.addEventListener("click", async () => {
-  await updateSettings({
-    queuePaused: !currentSettings.queuePaused
-  });
+  }, true);
   await loadQueue();
 });
 
@@ -1114,10 +1123,6 @@ saveWindowButton.addEventListener("click", async () => {
       loadSettings().catch(console.error);
     }, 1200);
   }
-});
-
-stopButton.addEventListener("click", () => {
-  sendQueueAction("stop-worker").catch(console.error);
 });
 
 retryFailedButton.addEventListener("click", () => {
@@ -1167,6 +1172,8 @@ extensionApi.runtime.onMessage.addListener((message) => {
     setPlaylistStatus(`Loading playlist videos... ${message.scanned} found`);
   }
 });
+
+setTab("queue");
 
 loadQueue().catch((error) => {
   console.error(error);

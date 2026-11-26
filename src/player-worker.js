@@ -163,7 +163,7 @@
     const initialTime = video.currentTime;
 
     while (Date.now() - startedAt < timeoutMs) {
-      if (!video.paused && video.currentTime > initialTime + 0.25) {
+      if (video.ended || (!video.paused && video.currentTime > initialTime + 0.25)) {
         return true;
       }
 
@@ -426,6 +426,10 @@
     const startedAt = Date.now();
 
     while (Date.now() - startedAt < playbackSeconds * 1000) {
+      if (video.ended) {
+        break;
+      }
+
       if (video.paused) {
         const restart = await startPlayback(video, 2500);
 
@@ -444,8 +448,8 @@
   }
 
   async function runWatchSimulation(options) {
-    const playbackSeconds = options.playbackSeconds || 10;
-    const seekFromEndSeconds = options.seekFromEndSeconds || 60;
+    const playbackSeconds = options.playbackSeconds || 5;
+    const seekFromEndSeconds = options.seekFromEndSeconds || 30;
     const itemId = options.itemId;
     await reportStatus(itemId, "waiting-for-video");
     let video = await waitForVideo(45000, itemId);

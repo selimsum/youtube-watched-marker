@@ -27,6 +27,9 @@ const WORKER_TIMEOUT_BUFFER_MS = 15000;
 const MAX_DEBUG_EVENTS = 80;
 const DEFAULT_WORKER_MODE = "window";
 const STOPPED_BY_USER_ERROR = "stopped-by-user";
+const QUEUE_CLEARED_ERROR = "queue-cleared";
+const REMOVED_BY_USER_ERROR = "removed-by-user";
+const COMPLETED_STATUS_FALLBACK_MS = 2000;
 const MIN_WORKER_WINDOW_SIZE = 320;
 const MAX_WORKER_WINDOW_SIZE = 3840;
 const PREOPEN_CLAIM_TIMEOUT_MS = 20000;
@@ -40,6 +43,11 @@ let lastKnownWorkerBounds = null;
 let lastContentQueueStateKey = null;
 let lastWorkerAbortError = null;
 let pendingPreopenedWorker = null;
+let queueProcessing = false;
+let queueProcessRequested = false;
+let backgroundStartPromise = null;
+let contextMenuRegisterChain = Promise.resolve();
+let queueItemCounter = 0;
 
 const extensionApi = getExtensionApi();
 
@@ -55,7 +63,7 @@ function getCandidateUrls(info, tab) {
 
 function createQueueItem(videoId, sourceUrl, title, extra) {
   return {
-    id: `${videoId}:${Date.now()}`,
+    id: `${videoId}:${Date.now()}:${++queueItemCounter}`,
     videoId,
     title: cleanTitle(title),
     sourceUrl,
@@ -473,7 +481,8 @@ function beginPreopenWorker(workerUrl) {
     if (previous.windowId) {
       closeWorkerQuietly({
         windowId: previous.windowId,
-        tabId: previous.tabId
+        tabId: previous.tabId,
+        ownsWindow: true
       }).catch(() => {});
     }
   }
@@ -494,7 +503,8 @@ function beginPreopenWorker(workerUrl) {
       if (record.state === "closed") {
         return closeWorkerQuietly({
           windowId: record.windowId,
-          tabId: record.tabId
+          tabId: record.tabId,
+          ownsWindow: true
         });
       }
     })
@@ -522,7 +532,8 @@ async function closePreopenedWorker() {
   if (record.windowId) {
     await closeWorkerQuietly({
       windowId: record.windowId,
-      tabId: record.tabId
+      tabId: record.tabId,
+      ownsWindow: true
     });
   }
 }
@@ -704,16 +715,15 @@ function getActiveQueueCount(queue) {
 }
 
 async function clearQueue() {
-  await abortActiveWorker(new Error("queue-cleared"));
+  await setPlaylistJob(null);
+  await setQueue([]);
+  await abortActiveWorker(new Error(QUEUE_CLEARED_ERROR));
   await closePreopenedWorker();
 
   if (retainedWorker) {
     await closeWorkerQuietly(retainedWorker);
     retainedWorker = null;
   }
-
-  await setPlaylistJob(null);
-  await setQueue([]);
 }
 
 async function removeQueueItem(itemId) {
@@ -721,10 +731,11 @@ async function removeQueueItem(itemId) {
   const item = queue.find((entry) => entry.id === itemId);
 
   if (item && activeWorker && activeWorker.itemId === item.id) {
-    await abortActiveWorker(new Error("removed-by-user"));
+    await abortActiveWorker(new Error(REMOVED_BY_USER_ERROR));
   }
 
-  await setQueue(queue.filter((entry) => entry.id !== itemId));
+  const latestQueue = await getQueue();
+  await setQueue(latestQueue.filter((entry) => entry.id !== itemId));
 }
 
 async function retryQueueItem(itemId) {
@@ -854,7 +865,7 @@ async function hasPendingQueueItems() {
 }
 
 async function retainWorkerForNextItem(worker) {
-  if (!worker || !worker.windowId || !worker.tabId) {
+  if (!worker || !worker.windowId || !worker.tabId || worker.ownsWindow === false) {
     return false;
   }
 
@@ -864,6 +875,7 @@ async function retainWorkerForNextItem(worker) {
     retainedWorker = {
       windowId: worker.windowId,
       tabId: worker.tabId,
+      ownsWindow: true,
       requestedBounds: worker.requestedBounds || normalizeWorkerBounds({
         left: workerWindow.left,
         top: workerWindow.top,
@@ -1035,7 +1047,8 @@ async function handleMenuClick(info, tab) {
     const videoId = extractVideoIdFromUrl(candidateUrl);
 
     if (videoId) {
-      const result = await enqueueVideo(videoId, candidateUrl, tab && tab.title);
+      const title = tab && candidateUrl === tab.url ? tab.title : "";
+      const result = await enqueueVideo(videoId, candidateUrl, title);
 
       if (!result.ok) {
         return;
@@ -1062,6 +1075,13 @@ async function handleRuntimeMessage(message) {
     // The background creates the window instead.
     beginPreopenWorker(message.workerUrl);
     return undefined;
+  }
+
+  if (message.type === "cancel-preopen-worker") {
+    await closePreopenedWorker();
+    return {
+      ok: true
+    };
   }
 
   if (message.type === "enqueue-video-url") {
@@ -1356,7 +1376,7 @@ async function closeWorkerQuietly(worker) {
     await stopWorkerPlaybackQuietly(worker.tabId);
   }
 
-  if (worker.windowId) {
+  if (worker.windowId && worker.ownsWindow !== false) {
     await rememberWorkerWindowBounds(worker);
 
     try {
@@ -1500,7 +1520,7 @@ async function saveCurrentWorkerWindowBounds() {
 }
 
 async function findCurrentWorkerWindowId() {
-  if (activeWorker && activeWorker.windowId) {
+  if (activeWorker && activeWorker.windowId && activeWorker.ownsWindow !== false) {
     return activeWorker.windowId;
   }
 
@@ -1516,7 +1536,16 @@ async function findCurrentWorkerWindowId() {
   });
   const workerTab = tabs.find((tab) => tab.windowId);
 
-  return workerTab ? workerTab.windowId : null;
+  if (!workerTab) {
+    return null;
+  }
+
+  try {
+    const win = await extensionApi.windows.get(workerTab.windowId);
+    return win && win.type === "popup" ? workerTab.windowId : null;
+  } catch {
+    return null;
+  }
 }
 
 function normalizeWorkerBounds(bounds) {
@@ -1693,29 +1722,35 @@ async function waitForTabComplete(tabId, timeoutMs) {
     return;
   }
 
-  await withTimeout(new Promise((resolve, reject) => {
-    function cleanup() {
-      extensionApi.tabs.onUpdated.removeListener(onUpdated);
-      extensionApi.tabs.onRemoved.removeListener(onRemoved);
-    }
+  let cleanup = () => {};
 
-    function onUpdated(updatedTabId, changeInfo) {
-      if (updatedTabId === tabId && changeInfo.status === "complete") {
-        cleanup();
-        resolve();
+  try {
+    await withTimeout(new Promise((resolve, reject) => {
+      cleanup = () => {
+        extensionApi.tabs.onUpdated.removeListener(onUpdated);
+        extensionApi.tabs.onRemoved.removeListener(onRemoved);
+      };
+
+      function onUpdated(updatedTabId, changeInfo) {
+        if (updatedTabId === tabId && changeInfo.status === "complete") {
+          cleanup();
+          resolve();
+        }
       }
-    }
 
-    function onRemoved(removedTabId) {
-      if (removedTabId === tabId) {
-        cleanup();
-        reject(new Error("worker-tab-closed"));
+      function onRemoved(removedTabId) {
+        if (removedTabId === tabId) {
+          cleanup();
+          reject(new Error("worker-tab-closed"));
+        }
       }
-    }
 
-    extensionApi.tabs.onUpdated.addListener(onUpdated);
-    extensionApi.tabs.onRemoved.addListener(onRemoved);
-  }), timeoutMs, "tab-load-timeout");
+      extensionApi.tabs.onUpdated.addListener(onUpdated);
+      extensionApi.tabs.onRemoved.addListener(onRemoved);
+    }), timeoutMs, "tab-load-timeout");
+  } finally {
+    cleanup();
+  }
 }
 
 function tabMatchesVideo(tab, videoId) {
@@ -1746,48 +1781,55 @@ async function waitForTabVideoUrl(tabId, videoId, timeoutMs) {
     return;
   }
 
-  await withTimeout(new Promise((resolve, reject) => {
-    function cleanup() {
-      clearInterval(pollId);
-      extensionApi.tabs.onUpdated.removeListener(onUpdated);
-      extensionApi.tabs.onRemoved.removeListener(onRemoved);
-    }
+  let cleanup = () => {};
 
-    async function checkCurrentTab() {
-      try {
-        const currentTab = await extensionApi.tabs.get(tabId);
-        if (tabMatchesVideo(currentTab, videoId)) {
+  try {
+    await withTimeout(new Promise((resolve, reject) => {
+      let pollId;
+      cleanup = () => {
+        clearInterval(pollId);
+        extensionApi.tabs.onUpdated.removeListener(onUpdated);
+        extensionApi.tabs.onRemoved.removeListener(onRemoved);
+      };
+
+      async function checkCurrentTab() {
+        try {
+          const currentTab = await extensionApi.tabs.get(tabId);
+          if (tabMatchesVideo(currentTab, videoId)) {
+            cleanup();
+            resolve();
+          }
+        } catch (error) {
+          cleanup();
+          reject(error);
+        }
+      }
+
+      function onUpdated(updatedTabId, _changeInfo, updatedTab) {
+        if (updatedTabId === tabId && tabMatchesVideo(updatedTab, videoId)) {
           cleanup();
           resolve();
         }
-      } catch (error) {
-        cleanup();
-        reject(error);
       }
-    }
 
-    function onUpdated(updatedTabId, _changeInfo, updatedTab) {
-      if (updatedTabId === tabId && tabMatchesVideo(updatedTab, videoId)) {
-        cleanup();
-        resolve();
+      function onRemoved(removedTabId) {
+        if (removedTabId === tabId) {
+          cleanup();
+          reject(new Error("worker-tab-closed"));
+        }
       }
-    }
 
-    function onRemoved(removedTabId) {
-      if (removedTabId === tabId) {
-        cleanup();
-        reject(new Error("worker-tab-closed"));
-      }
-    }
+      pollId = setInterval(() => {
+        checkCurrentTab().catch(reject);
+      }, 250);
 
-    const pollId = setInterval(() => {
+      extensionApi.tabs.onUpdated.addListener(onUpdated);
+      extensionApi.tabs.onRemoved.addListener(onRemoved);
       checkCurrentTab().catch(reject);
-    }, 250);
-
-    extensionApi.tabs.onUpdated.addListener(onUpdated);
-    extensionApi.tabs.onRemoved.addListener(onRemoved);
-    checkCurrentTab().catch(reject);
-  }), timeoutMs, "tab-video-url-timeout");
+    }), timeoutMs, "tab-video-url-timeout");
+  } finally {
+    cleanup();
+  }
 }
 
 async function injectPlayerWorker(tabId) {
@@ -1867,7 +1909,8 @@ function handleWorkerStatus(message) {
     return;
   }
 
-  activeWorker.lastStatus = message.status;
+  const worker = activeWorker;
+  worker.lastStatus = message.status;
   const playbackMode = getStatusPlaybackMode(message.status);
   updateQueueItem(message.itemId, {
     workerStatus: message.status,
@@ -1877,17 +1920,30 @@ function handleWorkerStatus(message) {
     elapsedMs: message.elapsedMs
   }).then((item) => notifyQueueUpdated({ item })).catch(console.error);
 
-  if (message.status === "completed-playback") {
-    resolveActiveWorker({
-      ok: true,
-      playbackMode: getPlaybackModeFromResult(null),
-      fallbackCompletedFromStatus: true
-    });
+  if (message.status === "completed-playback" && !worker.completedFallbackTimer && !worker.resultResolved) {
+    worker.completedFallbackTimer = setTimeout(() => {
+      if (activeWorker === worker) {
+        resolveActiveWorker({
+          ok: true,
+          playbackMode: getPlaybackModeFromResult(null),
+          fallbackCompletedFromStatus: true
+        });
+      }
+    }, COMPLETED_STATUS_FALLBACK_MS);
   }
 }
 
 function markWorkerSettled(worker) {
-  if (!worker || worker.resultResolved) {
+  if (!worker) {
+    return false;
+  }
+
+  if (worker.completedFallbackTimer) {
+    clearTimeout(worker.completedFallbackTimer);
+    worker.completedFallbackTimer = null;
+  }
+
+  if (worker.resultResolved) {
     return false;
   }
 
@@ -1994,6 +2050,7 @@ async function releaseWorkerTab() {
     return;
   }
 
+  const workerTabId = activeWorker.tabId;
   const previousTabId = activeWorker.previousTabId;
   const previousWindowId = activeWorker.previousWindowId;
   activeWorker.previousTabId = null;
@@ -2005,7 +2062,7 @@ async function releaseWorkerTab() {
     }).catch(() => {});
   }
 
-  if (previousTabId !== activeWorker.tabId) {
+  if (previousTabId && previousTabId !== workerTabId) {
     await extensionApi.tabs.update(previousTabId, {
       active: true
     }).catch(() => {});
@@ -2016,8 +2073,10 @@ async function setupWorker(item, settings, previousTab) {
   let tab = null;
   let workerWindowId = null;
   let requestedBounds = null;
+  let ownsWindow = false;
 
   if (settings.workerMode === "window") {
+    ownsWindow = true;
     const targetUrl = item.targetWorkerUrl || buildWatchUrl(item.videoId);
     let workerWindow = await useRetainedWorkerWindow(targetUrl);
 
@@ -2080,6 +2139,7 @@ async function setupWorker(item, settings, previousTab) {
     tab,
     workerWindowId,
     requestedBounds,
+    ownsWindow,
     previousTabId: previousTab && previousTab.id !== tab.id ? previousTab.id : null,
     previousWindowId: previousTab && previousTab.windowId !== workerWindowId ? previousTab.windowId : null
   };
@@ -2103,6 +2163,10 @@ async function finishQueueItem(item, result, settings) {
 }
 
 async function handleQueueItemError(item, error) {
+  if (error && (error.message === QUEUE_CLEARED_ERROR || error.message === REMOVED_BY_USER_ERROR)) {
+    return;
+  }
+
   const failedItem = await updateQueueItem(item.id, {
     status: "failed",
     completedAt: new Date().toISOString(),
@@ -2110,15 +2174,21 @@ async function handleQueueItemError(item, error) {
     debugSummary: "Worker window playback failed",
     error: error && error.message ? error.message : String(error)
   });
+
+  if (!failedItem) {
+    return;
+  }
+
   await recordPlaylistItemOutcome(item, false);
   await notifyQueueUpdated({ item: failedItem });
 }
 
-async function cleanupWorker(worker, workerWindowId, tab) {
+async function cleanupWorker(worker, workerWindowId, tab, ownsWindow) {
   if (worker) {
     const settings = await getSettings();
     const shouldRetain = (
       settings.workerMode === "window" &&
+      worker.ownsWindow !== false &&
       await hasPendingQueueItems() &&
       await retainWorkerForNextItem(worker)
     );
@@ -2126,8 +2196,8 @@ async function cleanupWorker(worker, workerWindowId, tab) {
     if (!shouldRetain) {
       await closeWorkerQuietly(worker);
     }
-  } else if (workerWindowId) {
-    await closeWorkerQuietly({ windowId: workerWindowId, tabId: tab && tab.id });
+  } else if (workerWindowId && ownsWindow) {
+    await closeWorkerQuietly({ windowId: workerWindowId, tabId: tab && tab.id, ownsWindow: true });
   } else if (tab && tab.id) {
     await closeTabQuietly(tab.id);
   }
@@ -2139,6 +2209,7 @@ async function cleanupWorker(worker, workerWindowId, tab) {
 async function runQueueItem(item) {
   let tab = null;
   let workerWindowId = null;
+  let ownsWindow = false;
 
   try {
     const runningItem = await updateQueueItem(item.id, {
@@ -2154,12 +2225,14 @@ async function runQueueItem(item) {
     const workerSetup = await setupWorker(item, settings, previousTab);
     tab = workerSetup.tab;
     workerWindowId = workerSetup.workerWindowId;
+    ownsWindow = workerSetup.ownsWindow;
 
     lastWorkerAbortError = null;
     activeWorker = {
       itemId: item.id,
       tabId: tab.id,
       windowId: workerWindowId,
+      ownsWindow,
       requestedBounds: workerSetup.requestedBounds,
       lastStatus: settings.workerMode === "window" ? "window-created" : "tab-created",
       previousTabId: workerSetup.previousTabId,
@@ -2187,7 +2260,7 @@ async function runQueueItem(item) {
   } catch (error) {
     await handleQueueItemError(item, error);
   } finally {
-    await cleanupWorker(activeWorker, workerWindowId, tab);
+    await cleanupWorker(activeWorker, workerWindowId, tab, ownsWindow);
   }
 }
 
@@ -2231,84 +2304,112 @@ async function resetStaleRunningItems() {
 }
 
 async function processQueue() {
-  if (await feedPlaylistJob()) {
-    await notifyQueueUpdated();
-  }
-
-  if (activeWorker) {
+  if (queueProcessing) {
+    queueProcessRequested = true;
     return;
   }
 
-  const settings = await getSettings();
+  queueProcessing = true;
 
-  if (settings.queuePaused) {
-    await extensionApi.storage.local.set({
-      [WAITING_FOR_DIRECT_OPEN_KEY]: false
-    });
-    await refreshBadge();
-    await notifyContentQueueState();
-    return;
+  try {
+    do {
+      queueProcessRequested = false;
+
+      if (await feedPlaylistJob()) {
+        await notifyQueueUpdated();
+      }
+
+      if (activeWorker) {
+        return;
+      }
+
+      const settings = await getSettings();
+
+      if (settings.queuePaused) {
+        await extensionApi.storage.local.set({
+          [WAITING_FOR_DIRECT_OPEN_KEY]: false
+        });
+        await refreshBadge();
+        await notifyContentQueueState();
+        return;
+      }
+
+      const queue = await getQueue();
+      const item = queue.find((entry) => entry.status === "pending");
+
+      if (!item) {
+        if (retainedWorker) {
+          await closeWorkerQuietly(retainedWorker);
+          retainedWorker = null;
+        }
+
+        await extensionApi.storage.local.set({
+          [WAITING_FOR_DIRECT_OPEN_KEY]: false
+        });
+        await refreshBadge();
+        await notifyContentQueueState();
+        return;
+      }
+
+      await runQueueItem(item);
+      queueProcessRequested = true;
+    } while (queueProcessRequested);
+  } finally {
+    queueProcessing = false;
   }
-
-  const queue = await getQueue();
-  const item = queue.find((entry) => entry.status === "pending");
-
-  if (!item) {
-    if (retainedWorker) {
-      await closeWorkerQuietly(retainedWorker);
-      retainedWorker = null;
-    }
-
-    await extensionApi.storage.local.set({
-      [WAITING_FOR_DIRECT_OPEN_KEY]: false
-    });
-    await refreshBadge();
-    await notifyContentQueueState();
-    return;
-  }
-
-  await runQueueItem(item);
-  processQueue().catch(console.error);
 }
 
 function startBackgroundWork() {
-  // Load the persisted cap before any queue write can happen.
-  return getSettings()
-    .then(() => resetStaleRunningItems())
-    .then(() => enforceSavedQueueLimit())
-    .then(() => processQueue());
+  if (!backgroundStartPromise) {
+    // Load the persisted cap before any queue write can happen.
+    backgroundStartPromise = getSettings()
+      .then(() => resetStaleRunningItems())
+      .then(() => enforceSavedQueueLimit())
+      .then(() => processQueue())
+      .finally(() => {
+        backgroundStartPromise = null;
+      });
+  }
+
+  return backgroundStartPromise;
 }
 
 function registerContextMenu() {
-  Promise.all(
-    MENU_IDS.map((menuId) => (
-      extensionApi.contextMenus.remove(menuId).catch(() => {
-        // The menu will not exist on first install or after some reloads.
-      })
-    ))
-  ).finally(() => {
-    extensionApi.contextMenus.create({
-      id: PAGE_MENU_ID,
-      title: "Mark as watched",
-      contexts: ["video"],
-      documentUrlPatterns: [
-        "*://www.youtube.com/*",
-        "*://m.youtube.com/*",
-        "*://youtu.be/*"
-      ]
+  contextMenuRegisterChain = contextMenuRegisterChain
+    .catch(() => {})
+    .then(async () => {
+      await Promise.all(
+        MENU_IDS.map((menuId) => (
+          extensionApi.contextMenus.remove(menuId).catch(() => {
+            // The menu will not exist on first install or after some reloads.
+          })
+        ))
+      );
+
+      extensionApi.contextMenus.create({
+        id: PAGE_MENU_ID,
+        title: "Mark as watched",
+        contexts: ["video"],
+        documentUrlPatterns: [
+          "*://www.youtube.com/*",
+          "*://m.youtube.com/*",
+          "*://youtu.be/*"
+        ]
+      });
+
+      extensionApi.contextMenus.create({
+        id: LINK_MENU_ID,
+        title: "Mark as watched",
+        contexts: ["link"],
+        targetUrlPatterns: [
+          "*://www.youtube.com/*",
+          "*://m.youtube.com/*",
+          "*://youtu.be/*"
+        ]
+      });
     });
 
-    extensionApi.contextMenus.create({
-      id: LINK_MENU_ID,
-      title: "Mark as watched",
-      contexts: ["link"],
-      targetUrlPatterns: [
-        "*://www.youtube.com/*",
-        "*://m.youtube.com/*",
-        "*://youtu.be/*"
-      ]
-    });
-  });
+  return contextMenuRegisterChain;
 }
 
 extensionApi.runtime.onInstalled.addListener(() => {

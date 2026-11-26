@@ -480,14 +480,34 @@ function getPublishDateInfo(container, videoId, pageDataDates) {
   return null;
 }
 
-const PUBLISH_TEXT_SELECTORS = [
+const METADATA_PUBLISH_SELECTORS = [
   "#metadata-line span",
   "span.inline-metadata-item",
-  "span.yt-core-attributed-string",
+  ".yt-content-metadata-view-model__metadata-text",
+  "span.yt-core-attributed-string"
+].join(",");
+
+const FALLBACK_PUBLISH_SELECTORS = [
   "yt-formatted-string",
   "[aria-label]",
   "[title]"
 ].join(",");
+
+const VIDEO_TITLE_EXCLUDE_SELECTOR = [
+  "a#video-title",
+  "a#video-title-link",
+  "h3",
+  "h4",
+  ".yt-lockup-metadata-view-model__title"
+].join(",");
+
+function getElementPublishText(element) {
+  return [
+    element.getAttribute("aria-label"),
+    element.getAttribute("title"),
+    element.textContent
+  ].filter(Boolean).join(" ");
+}
 
 function getPublishTextCandidates(container) {
   if (!container) {
@@ -500,20 +520,23 @@ function getPublishTextCandidates(container) {
   }
 
   const candidates = [];
+  const seen = new Set();
 
-  for (const element of container.querySelectorAll(PUBLISH_TEXT_SELECTORS)) {
-    const text = [
-      element.getAttribute("aria-label"),
-      element.getAttribute("title"),
-      element.textContent
-    ].filter(Boolean).join(" ");
+  for (const selector of [METADATA_PUBLISH_SELECTORS, FALLBACK_PUBLISH_SELECTORS]) {
+    for (const element of container.querySelectorAll(selector)) {
+      if (element.closest && element.closest(VIDEO_TITLE_EXCLUDE_SELECTOR)) {
+        continue;
+      }
 
-    if (looksLikePublishDateText(text)) {
-      candidates.push(text);
+      const text = getElementPublishText(element);
+      if (text && !seen.has(text) && looksLikePublishDateText(text)) {
+        seen.add(text);
+        candidates.push(text);
+      }
     }
   }
 
-  if (looksLikePublishDateText(container.textContent)) {
+  if (!candidates.length && looksLikePublishDateText(container.textContent)) {
     candidates.push(container.textContent);
   }
 
@@ -686,6 +709,8 @@ function extractTextValue(value) {
   return "";
 }
 
+const MONTH_WORD_REGEX = new RegExp(`\\b(${Object.keys(MONTHS).join("|")})\\b`);
+
 function looksLikePublishDateText(text) {
   const normalized = normalizeDateText(text);
 
@@ -696,7 +721,7 @@ function looksLikePublishDateText(text) {
       ONCE_REGEX.test(normalized) ||
       DATE_SLASH_REGEX.test(normalized) ||
       DATE_DASH_REGEX.test(normalized) ||
-      Object.keys(MONTHS).some((monthName) => normalized.includes(monthName))
+      MONTH_WORD_REGEX.test(normalized)
     )
   );
 }
@@ -712,10 +737,10 @@ function parsePublishDateText(text) {
 }
 
 const EXACT_DATE_REGEX_1 = /\b(\d{4})-(\d{1,2})-(\d{1,2})\b/;
-const EXACT_DATE_REGEX_2 = /\b(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})\b/;
+const EXACT_DATE_REGEX_2 = /\b(\d{1,2})([./-])(\d{1,2})\2(\d{2,4})\b/;
 const EXACT_DATE_REGEX_3 = /\b([a-z]+)\s+(\d{1,2})\s+(\d{4})\b/;
 const EXACT_DATE_REGEX_4 = /\b(\d{1,2})\s+([a-z]+)\s+(\d{4})\b/;
-const RELATIVE_DATE_REGEX = /\b(\d+)\s*(second|seconds|minute|minutes|hour|hours|day|days|week|weeks|month|months|year|years|saniye|saat|gun|hafta|ay|yil)\b/;
+const RELATIVE_DATE_REGEX = /\b(\d+)\s*(second|seconds|minute|minutes|hour|hours|day|days|week|weeks|month|months|year|years|saniye|dakika|saat|gun|hafta|ay|yil)\b/;
 const AGO_REGEX = /\bago\b/;
 const ONCE_REGEX = /\bonce\b/;
 const DATE_SLASH_REGEX = /\d{1,2}[./-]\d{1,2}[./-]\d{2,4}/;
@@ -760,6 +785,12 @@ function normalizeDateText(text) {
   return result;
 }
 
+function isMonthFirstLocale() {
+  const docLang = (typeof document !== "undefined" && document.documentElement && document.documentElement.lang) || "";
+  const lang = (docLang || (typeof navigator !== "undefined" && navigator.language) || "").toLowerCase();
+  return lang === "en" || lang.startsWith("en-us");
+}
+
 function parseExactDateText(text) {
   let match = EXACT_DATE_REGEX_1.exec(text);
 
@@ -770,8 +801,23 @@ function parseExactDateText(text) {
   match = EXACT_DATE_REGEX_2.exec(text);
 
   if (match) {
-    const year = Number(match[3].length === 2 ? `20${match[3]}` : match[3]);
-    return makeExactDate(year, Number(match[2]), Number(match[1]));
+    const first = Number(match[1]);
+    const sep = match[2];
+    const second = Number(match[3]);
+    const year = Number(match[4].length === 2 ? `20${match[4]}` : match[4]);
+    let monthFirst = false;
+
+    if (first > 12) {
+      monthFirst = false;
+    } else if (second > 12) {
+      monthFirst = true;
+    } else if (sep === "/" && isMonthFirstLocale()) {
+      monthFirst = true;
+    }
+
+    return monthFirst
+      ? makeExactDate(year, first, second)
+      : makeExactDate(year, second, first);
   }
 
   match = EXACT_DATE_REGEX_3.exec(text);
@@ -828,8 +874,16 @@ function parseRelativeDateText(text) {
 }
 
 function getRelativeUnitDays(unit) {
-  if (["second", "seconds", "minute", "minutes", "hour", "hours", "saniye", "saat"].includes(unit)) {
-    return 0.5;
+  if (["second", "seconds", "saniye"].includes(unit)) {
+    return 1 / 86400;
+  }
+
+  if (["minute", "minutes", "dakika"].includes(unit)) {
+    return 1 / 1440;
+  }
+
+  if (["hour", "hours", "saat"].includes(unit)) {
+    return 1 / 24;
   }
 
   if (["day", "days", "gun"].includes(unit)) {
@@ -1082,7 +1136,29 @@ function openWorkerWindow(workerUrl) {
   }
 }
 
+let preopenCancelTimer = 0;
+
+function clearPreopenCancelTimer() {
+  if (preopenCancelTimer) {
+    clearTimeout(preopenCancelTimer);
+    preopenCancelTimer = 0;
+  }
+}
+
+function cancelPendingPreopen() {
+  clearPreopenCancelTimer();
+
+  if (!pendingOpenedWorkerUrl) {
+    return;
+  }
+
+  pendingOpenedWorkerUrl = null;
+  extensionApi.runtime.sendMessage({ type: "cancel-preopen-worker" }).catch(() => {});
+  refreshDirectOpenState();
+}
+
 async function enqueueDirectOpen(url, title) {
+  clearPreopenCancelTimer();
   const workerUrl = buildWorkerUrl(url);
   const preopened = Boolean(workerUrl) && pendingOpenedWorkerUrl === workerUrl;
   let openedWorkerWindow = null;
@@ -1096,10 +1172,6 @@ async function enqueueDirectOpen(url, title) {
   }
 
   pendingOpenedWorkerUrl = null;
-
-  if (!preopened && !openedWorkerWindow && canOpenWorkerWindow) {
-    throw new Error("worker-window-blocked");
-  }
 
   const response = await extensionApi.runtime.sendMessage({
     type: preopened || openedWorkerWindow
@@ -1187,6 +1259,7 @@ document.addEventListener("click", rememberMenuTarget, true);
 // We avoid window.open() (blocked from capture handlers in FF content scripts)
 // by telling the background to create the worker window via windows.create().
 document.addEventListener('pointerdown', (e) => {
+  if (!(e.target instanceof Element)) return;
   const item = e.target.closest('ytd-menu-service-item-renderer, yt-list-item-view-model');
   if (!item) return;
   if (!isWatchedItemText(item.textContent)) return;
@@ -1195,6 +1268,7 @@ document.addEventListener('pointerdown', (e) => {
   if (!url) return;
   const workerUrl = buildWorkerUrl(url);
   if (!workerUrl || pendingOpenedWorkerUrl) return;
+  clearPreopenCancelTimer();
   pendingOpenedWorkerUrl = workerUrl;
   canOpenWorkerWindow = false;
   extensionApi.runtime.sendMessage({
@@ -1203,7 +1277,16 @@ document.addEventListener('pointerdown', (e) => {
   }).catch(() => {});
 }, true);
 
+document.addEventListener('pointercancel', cancelPendingPreopen, true);
+
+document.addEventListener('pointerup', () => {
+  if (!pendingOpenedWorkerUrl) return;
+  clearPreopenCancelTimer();
+  preopenCancelTimer = setTimeout(cancelPendingPreopen, 300);
+}, true);
+
 document.addEventListener('click', (e) => {
+  if (!(e.target instanceof Element)) return;
   const item = e.target.closest('ytd-menu-service-item-renderer, yt-list-item-view-model');
   if (!item) return;
   if (item.textContent.includes(WATCHED_REMOVE_ITEM_TEXT)) {

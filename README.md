@@ -12,7 +12,7 @@ Install from Firefox Add-ons: https://addons.mozilla.org/firefox/addon/youtube-w
 - Extracts video IDs from `youtube.com/watch?v=...`, `youtube.com/shorts/...`, `youtube.com/embed/...`, `youtube.com/live/...`, and `youtu.be/...`.
 - Stores each video once in a local queue.
 - Opens one queued video at a time in a dedicated worker browser window.
-- Defaults the worker window to `1280x720` at `left=2176, top=144`, based on the tested secondary-screen preset for a 4K 200% primary monitor with a 1920x1080 125% laptop monitor to the right.
+- Defaults the worker window to `1280x720` positioned by the browser, and remembers its position and size once moved or saved.
 - Seeks near the last 30 seconds, plays for 5 seconds, then closes the worker window.
 - Starts playback in the worker browser window, then returns focus to the previous tab while the 5-second run continues.
 - Shows the queue in the extension popup.
@@ -25,7 +25,7 @@ Install from Firefox Add-ons: https://addons.mozilla.org/firefox/addon/youtube-w
 - Includes a popup debug toggle for playback event timelines and an export button for a JSON debug log.
 - Includes popup controls for worker mode, playback seconds, seek distance from the end, stopping the active worker (which also pauses the queue so the next item does not start), retrying failed items, and clearing completed/failed items.
 - Includes a queue pause/resume control and a configurable active queue limit (`pending` + `running`).
-- Includes a separate **Saved queue limit** for the total number of items kept in the queue history. When the queue grows past it, the oldest finished (`completed`/`failed`) items are removed automatically on every queue write, when the limit is lowered, and at browser startup. the default cap is `100` and `0` keeps everything; `pending`, `running` and the item with a live worker are never removed, so a busy queue can temporarily sit above the limit.
+- Includes a separate **Saved queue limit** for the total number of items kept in the queue history. When the queue grows past it, the oldest finished (`completed`/`failed`) items are removed automatically on every queue write, when the limit is lowered, and at browser startup. The default cap is `100` and `0` keeps everything; `pending`, `running` and the item with a live worker are never removed, so a busy queue can temporarily sit above the limit.
 - Keeps playlist progress counts on the playlist job itself, so trimming finished items does not lose a long playlist's `done` count.
 - Includes reset/save buttons for the remembered worker window bounds.
 - Uses a stable Firefox add-on ID: `youtube-watched-marker@hayalet`.
@@ -70,10 +70,16 @@ Install from Firefox Add-ons: https://addons.mozilla.org/firefox/addon/youtube-w
 
 ## Development checks
 
-Run JavaScript syntax checks:
+Run JavaScript syntax checks, unit tests, and `web-ext lint`:
 
 ```powershell
 npm run check
+```
+
+Run unit tests only:
+
+```powershell
+npm test
 ```
 
 Optional Firefox extension lint/build, after installing dependencies:
